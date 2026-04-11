@@ -21,6 +21,25 @@ const DashboardPage = () => {
     }
   }, [tenant]);
 
+  const saveDealScores = async (deals, matrix, tenantId) => {
+    const rows = deals.map(deal => ({
+      tenant_id: tenantId,
+      matrix_id: matrix.id,
+      hubspot_deal_id: deal.id,
+      deal_name: deal.properties.dealname || null,
+      score: deal.score,
+      threshold_label: deal.threshold?.label || null,
+      threshold_color: deal.threshold?.color || null,
+      score_detail: deal.detail,
+      deal_amount: deal.properties.amount ? parseFloat(deal.properties.amount) : null,
+      hubspot_owner: deal.properties.hubspot_owner_id || null,
+    }));
+
+    const { error } = await supabase.from('deal_scores').insert(rows);
+    if (error) console.error('Error saving deal scores:', error.message);
+    else console.log(`Saved ${rows.length} scores to Supabase`);
+  };
+
   const fetchData = async () => {
     try {
       // Fetch active matrix
@@ -81,12 +100,15 @@ const DashboardPage = () => {
 
       // Calculate scores
       const dealsWithScores = hubspotDeals.map(deal => {
-        const score = calculateScore(matrix.criteria || [], deal.properties);
+        const { score, detail } = calculateScore(matrix.criteria || [], deal.properties);
         const threshold = getScoreThreshold(score, matrix.score_thresholds || []);
-        return { ...deal, score, threshold };
+        return { ...deal, score, detail, threshold };
       });
 
       setDeals(dealsWithScores);
+
+      // Save scores to Supabase (fire and forget)
+      saveDealScores(dealsWithScores, matrix, tenant.id);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {

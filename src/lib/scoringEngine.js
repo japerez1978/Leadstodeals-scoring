@@ -5,22 +5,30 @@
 export function calculateScore(criteria, dealProperties) {
   let sum = 0;
   let totalWeights = 0;
+  const detail = [];
 
   criteria.forEach(criterion => {
-    const hubspotProperty = criterion.hubspot_property;
-    const dealValue = dealProperties[hubspotProperty];
+    const dealValue = dealProperties[criterion.hubspot_property] ?? null;
+    const option = dealValue != null
+      ? criterion.criterion_options.find(o => o.hubspot_value === dealValue)
+      : null;
 
-    if (dealValue !== undefined && dealValue !== null) {
-      const option = criterion.criterion_options.find(opt => opt.hubspot_value === dealValue);
-      if (option) {
-        sum += criterion.weight * option.multiplier;
-      }
+    if (option) {
+      sum += criterion.weight * option.multiplier;
     }
     totalWeights += criterion.weight;
+
+    detail.push({
+      criterion: criterion.name,
+      weight: criterion.weight,
+      value: dealValue,
+      option_label: option?.label ?? null,
+      multiplier: option?.multiplier ?? null,
+    });
   });
 
-  const score = ((sum + totalWeights) / (totalWeights * 2)) * 100;
-  return Math.round(score);
+  const score = Math.round(((sum + totalWeights) / (totalWeights * 2)) * 100);
+  return { score, detail };
 }
 
 export function getScoreThreshold(score, thresholds) {
