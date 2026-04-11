@@ -17,20 +17,22 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Use ONLY onAuthStateChange — it fires INITIAL_SESSION synchronously
-    // with the persisted session on mount. Calling getSession() in parallel
-    // causes auth-token lock contention ("stole lock" errors).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      try {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchTenant(session.user.id);
-        } else {
-          setTenant(null);
-        }
-      } catch (err) {
-        console.error('Error handling auth state change:', err);
-      } finally {
+    // Supabase auth-lock deadlock guard:
+    // The onAuthStateChange callback runs INSIDE the gotrue auth lock. Any
+    // supabase.from(...) call inside it will try to re-acquire the same lock
+    // and hang forever — the app gets stuck in loading:true and paints as a
+    // black screen on refresh. Rule: the callback MUST be synchronous and
+    // MUST defer any further Supabase calls onto a fresh microtask/task.
+    // https://supabase.com/docs/reference/javascript/auth-onauthstatechange
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        // Defer OUT of the auth-lock callback
+        setTimeout(() => {
+          fetchTenant(session.user.id).finally(() => setLoading(false));
+        }, 0);
+      } else {
+        setTenant(null);
         setLoading(false);
       }
     });

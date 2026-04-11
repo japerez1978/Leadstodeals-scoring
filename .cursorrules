@@ -28,15 +28,47 @@ createRoot(document.getElementById('root')).render(
 )
 ```
 
-### 2. `AuthContext` — always clear `loading` in `finally`
+### 2. `AuthContext` — NEVER call supabase inside `onAuthStateChange` callback (auth-lock deadlock)
 
-`getSession` and `onAuthStateChange` handlers must wrap their body in
-`try/catch/finally` and call `setLoading(false)` in the `finally` block.
-If `fetchTenant` throws (e.g., accessing `data.tenants` when `data` is null),
-the app gets stuck in `loading: true` forever.
+The `onAuthStateChange` callback runs **inside** the `@supabase/gotrue-js`
+auth lock. Any `supabase.from(...)` / `supabase.auth.*` call awaited
+**inside** the callback tries to re-acquire the same lock and hangs forever.
+Symptom: app stuck in `loading: true`, `ProtectedRoute` shows the spinner on
+the dark background, you see this as a **black screen on refresh**. The CORS
+errors from `writeScoresToHubSpot` disappearing is the tell — the app never
+gets far enough to fire them.
 
-`fetchTenant` must explicitly handle `data === null` (user has no tenant row)
-and use `data?.tenants ?? null`.
+**Rule:** the callback must be **synchronous** (no `async`, no `await`) and
+must **defer** any further Supabase calls with `setTimeout(..., 0)`.
+`fetchTenant` must own its own `try/catch` and always return, and the
+deferred block ends with `.finally(() => setLoading(false))` so the spinner
+always clears.
+
+```jsx
+// ✅ Correct
+supabase.auth.onAuthStateChange((event, session) => {
+  setUser(session?.user ?? null);
+  if (session?.user) {
+    setTimeout(() => {
+      fetchTenant(session.user.id).finally(() => setLoading(false));
+    }, 0);
+  } else {
+    setTenant(null);
+    setLoading(false);
+  }
+});
+
+// ❌ Deadlocks the auth-lock → black screen on refresh
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (session?.user) await fetchTenant(session.user.id); // hangs
+  setLoading(false);
+});
+```
+
+`fetchTenant` must also explicitly handle `data === null` (user has no
+tenant row) and use `data?.tenants ?? null`.
+
+Reference: https://supabase.com/docs/reference/javascript/auth-onauthstatechange
 
 ### 3. Supabase queries: `.single()` is dangerous
 
