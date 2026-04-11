@@ -17,22 +17,9 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const getSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchTenant(session.user.id);
-        }
-      } catch (err) {
-        console.error('Error restoring session:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    getSession();
-
+    // Use ONLY onAuthStateChange — it fires INITIAL_SESSION synchronously
+    // with the persisted session on mount. Calling getSession() in parallel
+    // causes auth-token lock contention ("stole lock" errors).
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
         setUser(session?.user ?? null);
