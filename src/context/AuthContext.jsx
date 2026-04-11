@@ -18,24 +18,34 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchTenant(session.user.id);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchTenant(session.user.id);
+        }
+      } catch (err) {
+        console.error('Error restoring session:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchTenant(session.user.id);
-      } else {
-        setTenant(null);
+      try {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchTenant(session.user.id);
+        } else {
+          setTenant(null);
+        }
+      } catch (err) {
+        console.error('Error handling auth state change:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -50,11 +60,18 @@ export const AuthProvider = ({ children }) => {
 
     if (error) {
       console.error('Supabase error fetching tenant:', error);
+      setTenant(null);
+      return;
+    }
+
+    if (!data) {
+      console.warn('No tenant found for user:', authUserId);
+      setTenant(null);
       return;
     }
 
     console.log('Tenant data fetched:', data);
-    setTenant(data.tenants);
+    setTenant(data.tenants ?? null);
   };
 
   const signIn = async (email, password) => {
