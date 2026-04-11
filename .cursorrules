@@ -1,0 +1,85 @@
+# Leadstodeals Scoring — Cursor Rules
+
+Project stack: **Vite + React 19 + Tailwind CSS v4 + Supabase + React Router**.
+This is **NOT a Next.js project**. Do not add `"use client"` directives, `next/*` imports, or App Router patterns.
+
+---
+
+## Known bugs & gotchas — READ BEFORE TOUCHING THESE AREAS
+
+### 1. Never wrap `<App />` in `<StrictMode>` (Supabase auth lock deadlock)
+
+`@supabase/supabase-js` uses a `localStorage` lock to serialize access to the
+auth token. React `<StrictMode>` double-mounts components, so the second mount
+tries to acquire a lock the first mount still holds. The lock waits 5 seconds
+before forcefully recovering, during which `supabase.auth.getSession()` hangs,
+`AuthContext` stays in `loading: true`, and `ProtectedRoute` shows a spinner
+on the dark background — looking exactly like a broken black screen on refresh.
+
+**Rule:** `src/main.jsx` must render `<App />` directly, no `<StrictMode>` wrapper.
+
+```jsx
+// ✅ Correct
+createRoot(document.getElementById('root')).render(<App />)
+
+// ❌ Breaks refresh on protected routes
+createRoot(document.getElementById('root')).render(
+  <StrictMode><App /></StrictMode>
+)
+```
+
+### 2. `AuthContext` — always clear `loading` in `finally`
+
+`getSession` and `onAuthStateChange` handlers must wrap their body in
+`try/catch/finally` and call `setLoading(false)` in the `finally` block.
+If `fetchTenant` throws (e.g., accessing `data.tenants` when `data` is null),
+the app gets stuck in `loading: true` forever.
+
+`fetchTenant` must explicitly handle `data === null` (user has no tenant row)
+and use `data?.tenants ?? null`.
+
+### 3. Supabase queries: `.single()` is dangerous
+
+`.single()` throws 406 when 0 rows or >1 rows are returned. Always prefer:
+
+- `.maybeSingle()` — returns `null` if no rows, throws only on multiple.
+- `.limit(1).maybeSingle()` — safe when multiple rows are possible.
+
+### 4. `vercel.json` rewrite must exclude static assets
+
+For SPA routing on Vercel, the rewrite source **must not** match files with
+extensions, otherwise `/assets/index-xxx.js` and `.css` get rewritten to
+`/index.html` and the bundle never loads.
+
+```json
+{
+  "rewrites": [
+    {
+      "source": "/:path((?!.*\\.[a-z0-9]+$).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+```
+
+Do NOT use `/(.*)` as source.
+
+### 5. Multi-tenant proxy — never call HubSpot directly from the browser
+
+All HubSpot API calls go through `leadstodeals-admin` at
+`VITE_API_URL/proxy/hubspot/*`. The browser sends `X-Tenant-ID` header; the
+proxy reads `tenants.hubspot_access_token` from Supabase (service key) and
+forwards the call. Tokens never reach the browser.
+
+---
+
+## Conventions
+
+- Tailwind v4 — use arbitrary values sparingly, prefer design tokens.
+- All DB access through `src/lib/supabase.js` singleton.
+- Scoring logic lives in `src/lib/scoringEngine.js` — 4 criterion types:
+  `enum`, `range`, `province_map`, `sector_map`. Each criterion row in
+  Supabase has `type TEXT` and `config JSONB` columns.
+- Score formula: `((Σ(weight × multiplier) + totalWeights) / (totalWeights × 2)) × 100`, bounded 0–100.
+- Historical scores are **INSERTED** (not upserted) into `deal_scores` so we
+  keep a timeline.
