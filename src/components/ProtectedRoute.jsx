@@ -4,19 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import Spinner from './Spinner';
 
 const ProtectedRoute = ({ children, adminOnly = false }) => {
-  const { user, loading } = useAuth();
+  const { user, userRole, loading } = useAuth();
 
-  if (loading) {
-    return <Spinner />;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" />;
-  }
-
-  if (adminOnly && user.user_metadata?.role !== 'admin') {
-    return <Navigate to="/dashboard" />;
-  }
+  if (loading) return <Spinner />;
+  if (!user) return <Navigate to="/login" />;
+  if (adminOnly && !['admin','superadmin'].includes(userRole)) return <Navigate to="/dashboard" />;
 
   return children;
 };
