@@ -40,6 +40,35 @@ const DashboardPage = () => {
     else console.log(`Saved ${rows.length} scores to Supabase`);
   };
 
+  const writeScoresToHubSpot = async (deals) => {
+    const inputs = deals.map(deal => ({
+      id: deal.id,
+      properties: { score_rcm: String(deal.score) },
+    }));
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/proxy/hubspot/crm/v3/objects/deals/batch/update`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Tenant-ID': String(tenant.id),
+          },
+          body: JSON.stringify({ inputs }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        console.error('Error writing scores to HubSpot:', err);
+      } else {
+        console.log(`Wrote ${deals.length} scores to HubSpot (score_rcm)`);
+      }
+    } catch (err) {
+      console.error('writeScoresToHubSpot failed:', err.message);
+    }
+  };
+
   const fetchData = async () => {
     try {
       // Fetch active matrix
@@ -107,8 +136,9 @@ const DashboardPage = () => {
 
       setDeals(dealsWithScores);
 
-      // Save scores to Supabase (fire and forget)
+      // Save scores to Supabase and write back to HubSpot (fire and forget)
       saveDealScores(dealsWithScores, matrix, tenant.id);
+      writeScoresToHubSpot(dealsWithScores);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
