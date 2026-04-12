@@ -343,6 +343,21 @@ const DashboardPage = () => {
     }));
     const { error } = await supabase.from('deal_scores').insert(rows);
     if (error) console.error('Error saving deal scores:', error.message);
+
+    // Save DMI scores
+    const dmiRows = deals
+      .filter(deal => deal.dmi != null)
+      .map(deal => ({
+        tenant_id: tenantId,
+        hubspot_deal_id: deal.id,
+        deal_name: deal.properties.dealname || null,
+        dmi: deal.dmi,
+        source: 'poll',
+      }));
+    if (dmiRows.length > 0) {
+      const { error: dmiError } = await supabase.from('deal_momentum_index').insert(dmiRows);
+      if (dmiError) console.error('Error saving DMI scores:', dmiError.message);
+    }
   };
 
   const writeScoresToHubSpot = async (deals) => {
