@@ -45,35 +45,7 @@ export const useStageLabels = () => {
   });
 };
 
-const saveDealScores = async (deals, matrix, tenantId) => {
-  if (!tenantId || !matrix?.id || !deals.length) return;
-  const rows = deals.map(deal => ({
-    tenant_id: tenantId, matrix_id: matrix.id,
-    hubspot_deal_id: deal.id, deal_name: deal.properties.dealname || null,
-    score: deal.score, threshold_label: deal.threshold?.label || null,
-    threshold_color: deal.threshold?.color || null, score_detail: deal.detail,
-    deal_amount: deal.properties.amount ? parseFloat(deal.properties.amount) : null,
-    hubspot_owner: deal.properties.hubspot_owner_id || null,
-  }));
-  
-  // NOTE: assuming unique constraint on tenant_id, hubspot_deal_id. If missing, we should use standard insert and handle errors
-  const { error } = await supabase.from('deal_scores').upsert(rows);
-  if (error) console.error('Error saving deal scores:', error.message);
-
-  const dmiRows = deals
-    .filter(deal => deal.dmi != null)
-    .map(deal => ({
-      tenant_id: tenantId,
-      hubspot_deal_id: deal.id,
-      deal_name: deal.properties.dealname || null,
-      dmi: deal.dmi,
-      source: 'poll',
-    }));
-  if (dmiRows.length > 0) {
-    const { error: dmiError } = await supabase.from('deal_momentum_index').upsert(dmiRows);
-    if (dmiError) console.error('Error saving DMI scores:', dmiError.message);
-  }
-};
+// Removed saveDealScores to reduce DB calls as per user request
 
 export const useDashboardData = (tenantId) => {
   return useQuery({
@@ -122,21 +94,16 @@ export const useDashboardData = (tenantId) => {
         });
       });
 
-      // Fetch owners (Handle 403 Forbidden gracefully)
+      // Owners API disabled to avoid 403 Forbidden console noise until token has permissions
       const ownerMap = {};
+      /*
       try {
         const ownerRes = await fetch(`${HUBSPOT_PROXY_URL}/owners?limit=100`);
-        if (ownerRes.ok) {
-          const ownerData = await ownerRes.json();
-          (ownerData.results || []).forEach(o => {
-            ownerMap[String(o.id)] = `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email || '—';
-          });
-        }
-      } catch (e) {
-        console.warn('Owners API skipped (likely permission issue)');
-      }
+        if (ownerRes.ok) { ... }
+      } catch (e) { ... }
+      */
 
-      // Fetch company names via associations with ID validation
+      // Fetch company names via associations with ID validation and chunking (HubSpot limit is 100)
       const companyMap = {};
       try {
         const companyIds = [...new Set(
@@ -146,17 +113,21 @@ export const useDashboardData = (tenantId) => {
         )];
         
         if (companyIds.length > 0) {
-          const compRes = await fetch(
-            `${HUBSPOT_PROXY_URL}/objects/companies/batch/read`,
-            { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ inputs: companyIds.map(id => ({ id })), properties: ['name'] }) 
+          const CHUNK_SIZE = 100;
+          for (let i = 0; i < companyIds.length; i += CHUNK_SIZE) {
+            const chunk = companyIds.slice(i, i + CHUNK_SIZE);
+            const compRes = await fetch(
+              `${HUBSPOT_PROXY_URL}/objects/companies/batch/read`,
+              { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ inputs: chunk.map(id => ({ id })), properties: ['name'] }) 
+              }
+            );
+            if (compRes.ok) {
+              const compData = await compRes.json();
+              (compData.results || []).forEach(c => { companyMap[c.id] = c.properties?.name || '—'; });
             }
-          );
-          if (compRes.ok) {
-            const compData = await compRes.json();
-            (compData.results || []).forEach(c => { companyMap[c.id] = c.properties?.name || '—'; });
           }
         }
       } catch (e) { console.warn('Company batch skipped:', e.message); }
@@ -176,9 +147,6 @@ export const useDashboardData = (tenantId) => {
           : null;
         return { ...deal, score, detail, threshold, healthScore, dmi };
       });
-
-      // Fire and forget save
-      saveDealScores(dealsWithScores, matrix, tenantId);
 
       return { deals: dealsWithScores, labels: labelMap, probs: probMap, timestamp: Date.now(), ownerMap, companyMap };
     },
@@ -259,37 +227,13 @@ export const useDealDetails = (tenantId, dealId) => {
         ? Math.round(parseFloat(dealData.properties[healthScoreProp]))
         : null;
 
-      let historyData = [];
-      let healthChartData = [];
-      let dmiChartData = [];
-      try {
-        const { data } = await supabase
-          .from('deal_health_scores')
-          .select('score, dmi, recorded_at')
-          .eq('tenant_id', tenantId)
-          .eq('hubspot_deal_id', dealId)
-          .order('recorded_at', { ascending: true });
-        historyData = data || [];
-      } catch (e) { console.warn('Supabase history fetch error:', e); }
-
-      const sourceData = (historyData && historyData.length > 1)
-        ? historyData.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
-        : hsHistory;
-
-      healthChartData = sourceData.map((d, i, arr) => ({
+      // 5. Build Chart Data purely from HubSpot History (No Supabase DB calls)
+      const healthChartData = hsHistory.map((d, i, arr) => ({
         value: d.value, label: formatChartDate(d.ts, i, arr.length),
       }));
 
-      if (historyData && historyData.length > 0) {
-        const dmiData = historyData
-          .filter(r => r.dmi != null)
-          .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
-        if (dmiData.length >= 1) {
-          dmiChartData = dmiData.map((d, i, arr) => ({
-            value: d.value, label: formatChartDate(d.ts, i, arr.length),
-          }));
-        }
-      }
+      // DMI and Quality history are not available without DB persistence
+      const dmiChartData = [];
 
       return {
         deal: enrichedDeal,
