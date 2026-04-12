@@ -3,8 +3,10 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import Spinner from '../components/Spinner';
 
+const NEON = { green: '#00FF87', red: '#FF3B5C', blue: '#00D4FF', yellow: '#FFD600', orange: '#FF7A00', dim: '#3a3a3a' };
+
 /* ─────────────────────────────────────────────
-   Add Criterion Modal
+   Add Criterion Modal (terminal style)
 ───────────────────────────────────────────── */
 const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
   const [properties, setProperties] = useState([]);
@@ -36,9 +38,7 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
   const filteredProps = useMemo(() => {
     const q = search.toLowerCase();
     return properties.filter(p =>
-      p.label?.toLowerCase().includes(q) ||
-      p.name?.toLowerCase().includes(q) ||
-      p.groupName?.toLowerCase().includes(q)
+      p.label?.toLowerCase().includes(q) || p.name?.toLowerCase().includes(q) || p.groupName?.toLowerCase().includes(q)
     );
   }, [properties, search]);
 
@@ -103,58 +103,50 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
     }
   };
 
+  const inputCls = "w-full px-3 py-2 bg-[#0a0a0a] border border-[#1e1e1e] rounded text-white text-xs font-mono focus:outline-none focus:border-[#00D4FF] transition-colors";
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="bg-[#1c1b1c] border border-[#44474a] rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#44474a]">
-          <h2 className="text-base font-semibold text-white">Añadir criterio</h2>
-          <button onClick={onClose} className="text-[#c5c6ca] hover:text-white transition-colors">
-            <span className="material-symbols-outlined text-[20px]">close</span>
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-[#111] border border-[#1e1e1e] rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        style={{ fontFamily: "'JetBrains Mono', 'SF Mono', monospace" }}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e1e1e]">
+          <div className="flex items-center gap-2">
+            <span style={{ color: NEON.blue }}>+</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-white">Añadir Criterio</span>
+          </div>
+          <button onClick={onClose} className="text-[#3a3a3a] hover:text-white transition-colors text-xs">✕</button>
         </div>
 
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* Left: property picker */}
-          <div className="md:w-1/2 flex flex-col border-r border-[#44474a] overflow-hidden">
-            <div className="px-4 pt-4 pb-2">
-              <div className="flex items-center gap-2 bg-[#131313] border border-[#44474a] rounded-lg px-3 py-2">
-                <span className="material-symbols-outlined text-[16px] text-[#c5c6ca]">search</span>
-                <input
-                  type="text" placeholder="Buscar propiedades..."
-                  value={search} onChange={(e) => setSearch(e.target.value)}
-                  className="bg-transparent text-white text-sm placeholder-[#44474a] focus:outline-none flex-1"
-                />
+          <div className="md:w-1/2 flex flex-col border-r border-[#1e1e1e] overflow-hidden">
+            <div className="px-3 pt-3 pb-2">
+              <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[#1e1e1e] rounded px-2 py-1.5">
+                <span className="text-[#3a3a3a] text-xs">⌕</span>
+                <input type="text" placeholder="Buscar propiedades..." value={search} onChange={(e) => setSearch(e.target.value)}
+                  className="bg-transparent text-white text-[11px] font-mono placeholder-[#3a3a3a] focus:outline-none flex-1" />
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+            <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-3">
               {loadingProps ? (
                 <div className="flex justify-center py-8"><Spinner /></div>
               ) : Object.keys(grouped).length === 0 ? (
-                <p className="text-[#c5c6ca] text-sm text-center py-4">Sin resultados</p>
+                <p className="text-[#3a3a3a] text-xs text-center py-4">SIN RESULTADOS</p>
               ) : (
                 Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([group, props]) => (
                   <div key={group}>
-                    <p className="text-[#c5c6ca] text-xs font-semibold uppercase tracking-wider mb-1.5">{group}</p>
-                    <div className="space-y-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: NEON.dim }}>{group}</p>
+                    <div className="space-y-0.5">
                       {props.map((prop) => (
-                        <button
-                          key={prop.name}
-                          onClick={() => handleSelectProp(prop)}
-                          className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                        <button key={prop.name} onClick={() => handleSelectProp(prop)}
+                          className={`w-full text-left px-2 py-1.5 rounded transition-colors text-[11px] ${
                             selectedProp?.name === prop.name
-                              ? 'bg-accent/15 border border-accent/50 text-white'
-                              : 'bg-[#201f20] border border-transparent hover:border-[#44474a] text-[#c5c6ca]'
-                          }`}
-                        >
-                          <span className="font-medium text-white text-sm block">{prop.label}</span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <code className="text-[#c5c6ca] text-xs font-mono">{prop.name}</code>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#c5c6ca]">{prop.fieldType}</span>
-                          </div>
+                              ? 'bg-[#00D4FF10] border border-[#00D4FF30] text-white'
+                              : 'border border-transparent hover:bg-[#1a1a1a] text-[#8a8a8a]'
+                          }`}>
+                          <span className="text-white block">{prop.label}</span>
+                          <span className="text-[#3a3a3a] font-mono text-[9px]">{prop.name}</span>
                         </button>
                       ))}
                     </div>
@@ -165,60 +157,52 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
           </div>
 
           {/* Right: form */}
-          <div className="md:w-1/2 flex flex-col overflow-y-auto px-5 py-4 space-y-4">
+          <div className="md:w-1/2 flex flex-col overflow-y-auto px-4 py-3 space-y-3">
             {!selectedProp ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <span className="material-symbols-outlined text-[40px] text-[#44474a] mb-3">tune</span>
-                <p className="text-[#c5c6ca] text-sm">Selecciona una propiedad</p>
+                <span className="text-[#1e1e1e] text-2xl mb-2">⚙</span>
+                <p className="text-[#3a3a3a] text-xs">Selecciona una propiedad</p>
               </div>
             ) : (
               <>
                 <div>
-                  <label className="block text-[#c5c6ca] text-xs font-medium mb-1.5">Nombre del criterio</label>
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-[#131313] border border-[#44474a] rounded-lg text-white text-sm focus:outline-none focus:border-accent transition-colors" />
+                  <label className="block text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Nombre</label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
                 </div>
                 <div>
-                  <label className="block text-[#c5c6ca] text-xs font-medium mb-1.5">Propiedad HubSpot</label>
-                  <input type="text" value={hubspotProperty} onChange={(e) => setHubspotProperty(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-[#131313] border border-[#44474a] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-accent transition-colors" />
+                  <label className="block text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Propiedad HubSpot</label>
+                  <input type="text" value={hubspotProperty} onChange={(e) => setHubspotProperty(e.target.value)} className={inputCls} />
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <div className="flex-1">
-                    <label className="block text-[#c5c6ca] text-xs font-medium mb-1.5">Tipo</label>
-                    <select value={type} onChange={(e) => setType(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-[#131313] border border-[#44474a] rounded-lg text-white text-sm focus:outline-none focus:border-accent transition-colors">
+                    <label className="block text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Tipo</label>
+                    <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
                       <option value="options">options</option>
                       <option value="range">range</option>
                       <option value="text">text</option>
                     </select>
                   </div>
-                  <div className="w-24">
-                    <label className="block text-[#c5c6ca] text-xs font-medium mb-1.5">Peso</label>
-                    <input type="number" step="1" value={weight} onChange={(e) => setWeight(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-[#131313] border border-[#44474a] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-accent transition-colors" />
+                  <div className="w-20">
+                    <label className="block text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Peso</label>
+                    <input type="number" step="1" value={weight} onChange={(e) => setWeight(e.target.value)} className={inputCls + ' text-center'} />
                   </div>
                 </div>
-
                 {type === 'options' && selectedProp.options?.length > 0 && (
                   <div>
-                    <p className="text-[#c5c6ca] text-xs font-medium mb-2">Opciones ({selectedProp.options.length})</p>
-                    <div className="bg-[#131313] border border-[#44474a] rounded-lg p-3 space-y-1 max-h-40 overflow-y-auto">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Opciones ({selectedProp.options.length})</p>
+                    <div className="bg-[#0a0a0a] border border-[#1e1e1e] rounded p-2 space-y-0.5 max-h-32 overflow-y-auto">
                       {selectedProp.options.map((opt) => (
-                        <div key={opt.value} className="flex items-center justify-between text-xs">
+                        <div key={opt.value} className="flex items-center justify-between text-[10px]">
                           <span className="text-white">{opt.label}</span>
-                          <code className="text-[#c5c6ca] font-mono ml-2">{opt.value}</code>
+                          <span className="text-[#3a3a3a] font-mono">{opt.value}</span>
                         </div>
                       ))}
                     </div>
-                    <p className="text-[#c5c6ca] text-xs mt-1">Multiplicadores en 0 por defecto</p>
                   </div>
                 )}
-
                 {error && (
-                  <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                    <span className="material-symbols-outlined text-red-400 text-[14px]">error</span>
-                    <p className="text-red-400 text-sm">{error}</p>
+                  <div className="text-xs px-2 py-1.5 rounded border" style={{ color: NEON.red, borderColor: NEON.red + '30', backgroundColor: NEON.red + '10' }}>
+                    {error}
                   </div>
                 )}
               </>
@@ -226,15 +210,12 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#44474a]">
-          <button onClick={onClose}
-            className="px-4 py-2 text-[#c5c6ca] hover:text-white text-sm transition-colors">
-            Cancelar
-          </button>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[#1e1e1e]">
+          <button onClick={onClose} className="px-3 py-1.5 text-[#555] hover:text-white text-xs transition-colors">Cancelar</button>
           <button onClick={handleSave} disabled={!selectedProp || saving}
-            className="px-4 py-2 bg-accent hover:bg-accent-dim text-white rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-            {saving ? 'Guardando...' : 'Añadir criterio'}
+            className="px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-30"
+            style={{ color: NEON.green, border: `1px solid ${NEON.green}50`, backgroundColor: NEON.green + '10' }}>
+            {saving ? 'GUARDANDO...' : 'AÑADIR'}
           </button>
         </div>
       </div>
@@ -243,7 +224,7 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
 };
 
 /* ─────────────────────────────────────────────
-   Main Page
+   Main Page — Terminal Style
 ───────────────────────────────────────────── */
 const ScoringPage = () => {
   const { tenant } = useAuth();
@@ -299,147 +280,150 @@ const ScoringPage = () => {
   const weightTotal = (selectedMatrix?.criteria || []).reduce((s, c) => s + (c.weight || 0), 0);
   const weightOk = weightTotal === 100;
 
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center">
-        <Spinner />
-        <p className="mt-4 text-sm text-[#c5c6ca]">Cargando matrices...</p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center">
+      <Spinner />
+      <p className="mt-4 text-xs font-mono" style={{ color: NEON.blue }}>CARGANDO CONFIGURACIÓN...</p>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4" style={{ fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace" }}>
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Configuración de Scoring</h1>
-        <p className="text-[#c5c6ca] text-sm mt-1">Define criterios y pesos para la puntuación automática</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-black text-white tracking-tight">SCORING CONFIG</h1>
+          <p className="text-[10px] text-[#3a3a3a] mt-0.5">Criterios y pesos para puntuación automática</p>
+        </div>
       </div>
 
-      <div className="flex gap-6 items-start">
+      <div className="flex gap-4 items-start">
         {/* Matrices sidebar */}
-        <div className="w-48 shrink-0 space-y-1">
-          <p className="text-xs font-semibold text-[#c5c6ca] uppercase tracking-wider mb-2">Matrices</p>
-          {matrices.map(matrix => (
-            <button
-              key={matrix.id}
-              onClick={() => setSelectedMatrix(matrix)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors text-sm ${
-                selectedMatrix?.id === matrix.id
-                  ? 'bg-accent/15 text-white border border-accent/30'
-                  : 'text-[#c5c6ca] hover:bg-[#201f20] hover:text-white border border-transparent'
-              }`}
-            >
-              <p className="font-medium truncate">{matrix.name}</p>
-              <p className="text-xs opacity-60 mt-0.5">{matrix.criteria?.length || 0} criterios</p>
-            </button>
-          ))}
+        <div className="w-44 shrink-0">
+          <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg overflow-hidden">
+            <div className="px-3 py-2 border-b border-[#1e1e1e]">
+              <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: NEON.blue }}>MATRICES</span>
+            </div>
+            <div className="space-y-0.5 p-1">
+              {matrices.map(matrix => (
+                <button key={matrix.id} onClick={() => setSelectedMatrix(matrix)}
+                  className={`w-full text-left px-2 py-2 rounded transition-colors text-[11px] ${
+                    selectedMatrix?.id === matrix.id
+                      ? 'bg-[#00D4FF10] border border-[#00D4FF30] text-white'
+                      : 'text-[#8a8a8a] hover:bg-[#1a1a1a] hover:text-white border border-transparent'
+                  }`}>
+                  <p className="font-medium truncate">{matrix.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[9px] text-[#3a3a3a]">{matrix.criteria?.length || 0} crit.</span>
+                    <span className="text-[9px] px-1 rounded" style={{
+                      color: matrix.active ? NEON.green : NEON.red,
+                      backgroundColor: matrix.active ? NEON.green + '10' : NEON.red + '10',
+                    }}>{matrix.active ? 'ON' : 'OFF'}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Main content */}
-        <div className="flex-1 min-w-0 space-y-5">
+        <div className="flex-1 min-w-0 space-y-4">
           {selectedMatrix ? (
             <>
               {/* Matrix header */}
-              <div className="bg-[#1c1b1c] border border-[#44474a] rounded-lg p-4 flex items-center justify-between gap-4">
+              <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg p-3 flex items-center justify-between">
                 <div>
-                  <h2 className="text-white font-semibold">{selectedMatrix.name}</h2>
+                  <h2 className="text-white font-bold text-sm">{selectedMatrix.name}</h2>
                   {selectedMatrix.description && (
-                    <p className="text-[#c5c6ca] text-xs mt-1">{selectedMatrix.description}</p>
+                    <p className="text-[#3a3a3a] text-[10px] mt-0.5">{selectedMatrix.description}</p>
                   )}
                 </div>
-                <span className={`px-2.5 py-1 rounded text-xs font-medium ${
-                  selectedMatrix.active ? 'bg-green-500/15 text-green-400' : 'bg-[#2a2a2a] text-[#c5c6ca]'
-                }`}>
-                  {selectedMatrix.active ? 'Activa' : 'Inactiva'}
+                <span className="text-[9px] font-bold px-2 py-0.5 rounded" style={{
+                  color: selectedMatrix.active ? NEON.green : NEON.red,
+                  backgroundColor: selectedMatrix.active ? NEON.green + '10' : NEON.red + '10',
+                  border: `1px solid ${selectedMatrix.active ? NEON.green : NEON.red}30`,
+                }}>
+                  {selectedMatrix.active ? 'ACTIVA' : 'INACTIVA'}
                 </span>
               </div>
 
               {/* Criteria */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="text-sm font-semibold text-[#c5c6ca] uppercase tracking-wider">Criterios</h3>
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: NEON.orange }}>CRITERIOS</span>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs font-mono px-2.5 py-1 rounded border ${
-                      weightOk
-                        ? 'border-green-500/40 text-green-400 bg-green-500/10'
-                        : 'border-yellow-500/40 text-yellow-400 bg-yellow-500/10'
-                    }`}>
-                      Σ {weightTotal} / 100 {weightOk ? '✓' : '⚠'}
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded border" style={{
+                      color: weightOk ? NEON.green : NEON.yellow,
+                      borderColor: (weightOk ? NEON.green : NEON.yellow) + '30',
+                      backgroundColor: (weightOk ? NEON.green : NEON.yellow) + '10',
+                    }}>
+                      Σ {weightTotal}/100 {weightOk ? '✓' : '⚠'}
                     </span>
-                    <button
-                      onClick={() => setShowAddModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-dim text-white rounded-lg text-xs font-medium transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">add</span>
-                      Añadir
+                    <button onClick={() => setShowAddModal(true)}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase transition-all"
+                      style={{ color: NEON.green, border: `1px solid ${NEON.green}50`, backgroundColor: NEON.green + '10' }}>
+                      + AÑADIR
                     </button>
                   </div>
                 </div>
 
                 {selectedMatrix.criteria?.length > 0 ? (
-                  <div className="space-y-3">
-                    {selectedMatrix.criteria.map(criterion => (
-                      <div key={criterion.id} className="bg-[#1c1b1c] border border-[#44474a] rounded-lg overflow-hidden">
+                  <div className="border border-[#1e1e1e] rounded-lg overflow-hidden">
+                    {selectedMatrix.criteria.map((criterion, idx) => (
+                      <div key={criterion.id} className={`${idx > 0 ? 'border-t border-[#1e1e1e]' : ''}`}>
                         {/* Criterion header */}
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-[#44474a]/50">
+                        <div className="flex items-center justify-between px-3 py-2 bg-[#0d0d0d]">
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-white text-sm font-medium">{criterion.name}</h4>
-                            <code className="text-[#c5c6ca] text-xs font-mono">{criterion.hubspot_property}</code>
+                            <span className="text-white text-xs font-bold">{criterion.name}</span>
+                            <span className="text-[#3a3a3a] text-[9px] font-mono ml-2">{criterion.hubspot_property}</span>
                           </div>
-                          <div className="flex items-center gap-3 shrink-0 ml-3">
-                            <div className="flex items-center gap-1.5">
-                              <label className="text-[#c5c6ca] text-xs">Peso</label>
-                              <input
-                                type="number" step="0.1"
-                                defaultValue={criterion.weight}
-                                onBlur={(e) => {
-                                  const v = parseFloat(e.target.value);
-                                  if (!isNaN(v) && v !== criterion.weight) updateCriterion(criterion.id, 'weight', v);
-                                }}
-                                className="w-16 px-2 py-1 bg-[#131313] border border-[#44474a] rounded text-white font-mono text-xs focus:outline-none focus:border-accent text-center transition-colors"
-                              />
-                            </div>
-                            <button
-                              onClick={() => deleteCriterion(criterion)}
-                              className="text-[#c5c6ca] hover:text-red-400 transition-colors p-1"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">delete</span>
-                            </button>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <label className="text-[9px] text-[#555]">PESO</label>
+                            <input type="number" step="0.1" defaultValue={criterion.weight}
+                              onBlur={(e) => {
+                                const v = parseFloat(e.target.value);
+                                if (!isNaN(v) && v !== criterion.weight) updateCriterion(criterion.id, 'weight', v);
+                              }}
+                              className="w-14 px-1.5 py-0.5 bg-[#0a0a0a] border border-[#1e1e1e] rounded text-white font-mono text-[10px] focus:outline-none focus:border-[#00D4FF] text-center" />
+                            <button onClick={() => deleteCriterion(criterion)}
+                              className="text-[#3a3a3a] hover:text-[#FF3B5C] transition-colors text-[10px]">✕</button>
                           </div>
                         </div>
 
                         {/* Options */}
                         {criterion.criterion_options?.length > 0 && (
-                          <div className="p-3 space-y-1.5">
-                            {criterion.criterion_options.map(option => (
-                              <div key={option.id} className="flex items-center justify-between bg-[#131313] rounded px-3 py-2">
-                                <div>
-                                  <span className="text-white text-xs font-medium">{option.label}</span>
-                                  <code className="text-[#c5c6ca] text-xs font-mono ml-2">{option.hubspot_value}</code>
+                          <div className="bg-[#0a0a0a] px-3 py-1.5 space-y-0.5">
+                            {criterion.criterion_options.map(option => {
+                              const m = option.multiplier;
+                              const mColor = m > 0 ? NEON.green : m < 0 ? NEON.red : NEON.dim;
+                              return (
+                                <div key={option.id} className="flex items-center justify-between py-1 text-[10px]">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: mColor }} />
+                                    <span className="text-white">{option.label}</span>
+                                    <span className="text-[#3a3a3a] font-mono text-[9px]">{option.hubspot_value}</span>
+                                  </div>
+                                  <select value={option.multiplier}
+                                    onChange={(e) => updateOption(option.id, 'multiplier', parseFloat(e.target.value))}
+                                    className="px-1.5 py-0.5 bg-[#111] border border-[#1e1e1e] rounded text-white text-[10px] font-mono focus:outline-none focus:border-[#00D4FF] cursor-pointer">
+                                    <option value={1}>+1.0 Muy Alto</option>
+                                    <option value={0.5}>+0.5 Alto</option>
+                                    <option value={0}>0.0 Medio</option>
+                                    <option value={-0.5}>-0.5 Bajo</option>
+                                    <option value={-1}>-1.0 Muy Bajo</option>
+                                  </select>
                                 </div>
-                                <select
-                                  value={option.multiplier}
-                                  onChange={(e) => updateOption(option.id, 'multiplier', parseFloat(e.target.value))}
-                                  className="px-2 py-1 bg-[#1c1b1c] border border-[#44474a] rounded text-white text-xs focus:outline-none focus:border-accent transition-colors cursor-pointer"
-                                >
-                                  <option value={1}>Muy Alto</option>
-                                  <option value={0.5}>Alto</option>
-                                  <option value={0}>Medio</option>
-                                  <option value={-0.5}>Bajo</option>
-                                  <option value={-1}>Muy Bajo</option>
-                                </select>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
 
                         {criterion.type === 'range' && criterion.config?.ranges && (
-                          <div className="p-3 space-y-1.5">
+                          <div className="bg-[#0a0a0a] px-3 py-1.5 space-y-0.5">
                             {criterion.config.ranges.map((range, idx) => (
-                              <div key={idx} className="flex items-center justify-between bg-[#131313] rounded px-3 py-2 text-xs">
-                                <span className="text-white">{range.min ?? '∞'} – {range.max ?? '∞'}</span>
-                                <span className="text-accent font-mono">× {range.multiplier}</span>
+                              <div key={idx} className="flex items-center justify-between py-1 text-[10px]">
+                                <span className="text-white font-mono">{range.min ?? '∞'} – {range.max ?? '∞'}</span>
+                                <span className="font-mono" style={{ color: NEON.blue }}>× {range.multiplier}</span>
                               </div>
                             ))}
                           </div>
@@ -448,12 +432,12 @@ const ScoringPage = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="bg-[#1c1b1c] border border-[#44474a] rounded-lg p-8 text-center">
-                    <span className="material-symbols-outlined text-[40px] text-[#44474a] block mb-3">tune</span>
-                    <p className="text-[#c5c6ca] text-sm">No hay criterios configurados</p>
+                  <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg py-8 text-center">
+                    <p className="text-[#3a3a3a] text-xs font-mono">SIN CRITERIOS CONFIGURADOS</p>
                     <button onClick={() => setShowAddModal(true)}
-                      className="mt-3 px-4 py-2 bg-accent hover:bg-accent-dim text-white rounded-lg text-sm font-medium transition-colors">
-                      Añadir primer criterio
+                      className="mt-3 px-3 py-1.5 rounded text-[10px] font-bold uppercase"
+                      style={{ color: NEON.green, border: `1px solid ${NEON.green}50`, backgroundColor: NEON.green + '10' }}>
+                      + AÑADIR CRITERIO
                     </button>
                   </div>
                 )}
@@ -461,54 +445,48 @@ const ScoringPage = () => {
 
               {/* Thresholds */}
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-[#c5c6ca] uppercase tracking-wider">Semáforos</h3>
+                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: NEON.orange }}>SEMÁFOROS</span>
                 {selectedMatrix.score_thresholds?.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2">
                     {selectedMatrix.score_thresholds.map(threshold => {
-                      const dotColor =
-                        threshold.color === 'green' ? 'bg-green-500' :
-                        threshold.color === 'yellow' ? 'bg-yellow-500' : 'bg-red-500';
+                      const c = threshold.color === 'green' ? NEON.green : threshold.color === 'yellow' ? NEON.yellow : NEON.red;
                       return (
-                        <div key={threshold.id} className="bg-[#1c1b1c] border border-[#44474a] rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
-                            <h4 className="font-medium text-white text-sm">{threshold.label}</h4>
+                        <div key={threshold.id} className="bg-[#0d0d0d] border rounded-lg px-3 py-2" style={{ borderColor: c + '30' }}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}80` }} />
+                            <span className="font-bold text-[10px]" style={{ color: c }}>{threshold.label}</span>
                           </div>
-                          <p className="text-[#c5c6ca] text-xs">{threshold.min_score} – {threshold.max_score} pts</p>
+                          <span className="text-[#8a8a8a] text-[10px] font-mono">{threshold.min_score} – {threshold.max_score}</span>
                         </div>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="bg-[#1c1b1c] border border-[#44474a] rounded-lg p-6 text-center">
-                    <p className="text-[#c5c6ca] text-sm">No hay semáforos configurados</p>
+                  <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg p-4 text-center">
+                    <p className="text-[#3a3a3a] text-xs font-mono">SIN SEMÁFOROS</p>
                   </div>
                 )}
               </div>
 
               {/* Formula */}
-              <div className="bg-[#1c1b1c] border border-[#44474a] rounded-lg px-4 py-3">
-                <p className="text-[#c5c6ca] text-xs">
-                  <span className="font-semibold text-white">Fórmula:</span>{' '}
-                  ((Σ(peso × multiplicador) + totalPesos) / (totalPesos × 2)) × 100
+              <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg px-3 py-2">
+                <p className="text-[10px] font-mono text-[#555]">
+                  <span style={{ color: NEON.blue }}>ƒ</span> = ((Σ(peso × multiplicador) + totalPesos) / (totalPesos × 2)) × 100
                 </p>
               </div>
             </>
           ) : (
-            <div className="bg-[#1c1b1c] border border-[#44474a] rounded-lg p-12 text-center">
-              <span className="material-symbols-outlined text-[48px] text-[#44474a] block mb-3">tune</span>
-              <p className="text-[#c5c6ca]">Selecciona una matriz para comenzar</p>
+            <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded-lg py-16 text-center">
+              <p className="text-[#3a3a3a] text-xs font-mono">SELECCIONA UNA MATRIZ</p>
             </div>
           )}
         </div>
       </div>
 
       {showAddModal && selectedMatrix && (
-        <AddCriterionModal
-          matrixId={selectedMatrix.id}
+        <AddCriterionModal matrixId={selectedMatrix.id}
           onClose={() => setShowAddModal(false)}
-          onSaved={() => { setShowAddModal(false); fetchMatrices(); }}
-        />
+          onSaved={() => { setShowAddModal(false); fetchMatrices(); }} />
       )}
     </div>
   );
