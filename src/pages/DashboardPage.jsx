@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { calculateScore, getScoreThreshold } from '../lib/scoringEngine';
+import { useQueryClient } from '@tanstack/react-query';
+import { useDashboardData } from '../hooks/useQueries';
 import Spinner from '../components/Spinner';
 
 // ─── Neon palette ─────────────────────────────────────────────────────────────
@@ -201,288 +203,27 @@ const TableHead = () => (
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
-const CACHE_KEY = 'dashboard_deals_cache';
-const CACHE_TTL = 5 * 60 * 1000; // 5 min
 
 const DashboardPage = () => {
   const { tenant } = useAuth();
   const navigate = useNavigate();
-  const [deals, setDeals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingStep, setLoadingStep] = useState('');
-  const [stageLabels, setStageLabels] = useState({});
-  const [stageProbabilities, setStageProbabilities] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('live');
   const [clock, setClock] = useState(new Date());
-  const [cacheAge, setCacheAge] = useState(null);
-  const [ownerMap, setOwnerMap] = useState({});
-  const [companyMap, setCompanyMap] = useState({});
 
-  // Clock: 1s updates caused full page re-renders (no extra network, but noisy). Minute tick is enough for the header.
+  const queryClient = useQueryClient();
+  const { data: dashboardData, isLoading: loading, isFetching: refreshing } = useDashboardData(tenant?.id);
+
+  const deals = dashboardData?.deals || [];
+  const stageLabels = dashboardData?.labels || {};
+  const stageProbabilities = dashboardData?.probs || {};
+  const cacheAge = dashboardData?.timestamp ? Date.now() - dashboardData.timestamp : 0;
+  const loadingStep = loading ? 'Cargando datos de matriz y HubSpot...' : '';
+
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
-
-  const fetchGenRef = useRef(0);
-
-  const fetchAllDeals = async () => {
-    const properties = [
-      'dealname','amount','dealstage','unidad_de_negocio_deal',
-      'prioridad_de_obra__proyecto','ubicacion_provincia_obra__proyecto',
-      'madurez_en_adjudicacion_obra__proyecto','tipo_de_obra__proyecto',
-      'valor_actual','numero_total_de_depositos','sector_partida',
-      'peso_total_cmr_toneladas','hubspot_owner_id',
-      'hs_deal_score','hs_predictive_deal_score',
-    ];
-    const baseUrl = `${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/objects/deals`;
-    let allDeals = [];
-    let after = null;
-    do {
-      const url = `${baseUrl}?limit=100&properties=${properties.join(',')}${after ? `&after=${after}` : ''}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      allDeals = allDeals.concat(data.results || []);
-      after = data.paging?.next?.after ?? null;
-    } while (after);
-    return allDeals;
-  };
-
-  const fetchCompanyNames = async (deals) => {
-    try {
-      const ids = [...new Set(
-        deals.flatMap(d => (d.associations?.companies?.results || []).map(c => c.id))
-      )].filter(Boolean);
-      if (!ids.length) return;
-      const res = await fetch(
-        `${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/objects/companies/batch/read`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ inputs: ids.map(id => ({ id })), properties: ['name'] }) }
-      );
-      const data = await res.json();
-      const map = {};
-      (data.results || []).forEach(c => { map[c.id] = c.properties?.name || '—'; });
-      setCompanyMap(map);
-    } catch (e) { console.warn('company names error:', e.message); }
-  };
-
-  const fetchOwners = async () => {
-    // Disabled - endpoint returns 403 Forbidden
-    try {
-      const res = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/owners?limit=100`);
-      if (!res.ok) {
-        console.warn('Owners API unavailable (403 Forbidden)');
-        return {};
-      }
-      const data = await res.json();
-      const map = {};
-      (data.results || []).forEach(o => { 
-        const name = `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email;
-        map[String(o.id)] = name;
-      });
-      setOwnerMap(map);
-      return map;
-    } catch (e) { 
-      console.warn('owners error:', e.message);
-      return {};
-    }
-  };
-
-  const fetchStageLabels = async () => {
-    const labelMap = {};
-    const probMap = {};
-    try {
-      const res = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/pipelines/deals`);
-      const data = await res.json();
-      (data.results || []).forEach(pipeline => {
-        (pipeline.stages || []).forEach(stage => {
-          labelMap[stage.id] = stage.label;
-          const prob = stage.metadata?.probability;
-          probMap[stage.id] = prob != null ? Math.round(parseFloat(prob) * 100) : null;
-        });
-      });
-      setStageLabels(labelMap);
-      setStageProbabilities(probMap);
-    } catch (e) { console.warn('stages error:', e.message); }
-    return { labelMap, probMap };
-  };
-
-  const saveDealScores = async (deals, matrix, tenantId) => {
-    const rows = deals.map(deal => ({
-      tenant_id: tenantId, matrix_id: matrix.id,
-      hubspot_deal_id: deal.id, deal_name: deal.properties.dealname || null,
-      score: deal.score, threshold_label: deal.threshold?.label || null,
-      threshold_color: deal.threshold?.color || null, score_detail: deal.detail,
-      deal_amount: deal.properties.amount ? parseFloat(deal.properties.amount) : null,
-      hubspot_owner: deal.properties.hubspot_owner_id || null,
-    }));
-    const { error } = await supabase.from('deal_scores').insert(rows);
-    if (error) console.error('Error saving deal scores:', error.message);
-
-    // Save DMI scores
-    const dmiRows = deals
-      .filter(deal => deal.dmi != null)
-      .map(deal => ({
-        tenant_id: tenantId,
-        hubspot_deal_id: deal.id,
-        deal_name: deal.properties.dealname || null,
-        dmi: deal.dmi,
-        source: 'poll',
-      }));
-    if (dmiRows.length > 0) {
-      const { error: dmiError } = await supabase.from('deal_momentum_index').insert(dmiRows);
-      if (dmiError) console.error('Error saving DMI scores:', dmiError.message);
-    }
-  };
-
-  const writeScoresToHubSpot = async (deals) => {
-    // Disabled - causes CORS errors
-    console.log('writeScoresToHubSpot: Disabled to avoid CORS issues');
-    return;
-    /*
-    const inputs = deals.map(deal => ({ id: deal.id, properties: { score_rcm: String(deal.score) } }));
-    const chunks = [];
-    for (let i = 0; i < inputs.length; i += 100) chunks.push(inputs.slice(i, i + 100));
-    for (const chunk of chunks) {
-      try {
-        const res = await fetch(
-          `${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/objects/deals/batch/update`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': String(tenant.id) }, body: JSON.stringify({ inputs: chunk }) }
-        );
-        if (!res.ok) console.error('HubSpot batch error:', await res.json());
-      } catch (err) { console.error('writeScoresToHubSpot:', err.message); }
-    }
-    */
-  };
-
-  const fetchData = async (silent = false, opts = {}) => {
-    const { aborted, gen } = opts;
-    const stale = () =>
-      aborted?.() === true || (gen != null && gen !== fetchGenRef.current);
-
-    try {
-      if (!tenant?.id) return;
-      if (stale()) return;
-
-      if (import.meta.env.DEV) {
-        console.log('[dashboard/fetchData]', { silent, gen, tenantId: tenant.id });
-      }
-
-      if (!silent) setLoadingStep('Cargando matriz...');
-
-      const { data: matrix, error: matrixError } = await supabase
-        .from('scoring_matrices')
-        .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
-        .eq('tenant_id', tenant.id).eq('active', true).limit(1).maybeSingle();
-
-      if (stale()) return;
-
-      if (matrixError || !matrix) {
-        setDeals([]);
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
-
-      if (!silent) setLoadingStep('Conectando con HubSpot...');
-      const hubspotDeals = await fetchAllDeals();
-      if (stale()) return;
-
-      const { labelMap, probMap } = await fetchStageLabels();
-      if (stale()) return;
-
-      if (!silent) setLoadingStep('Calculando scores...');
-      const dealsWithScores = hubspotDeals.map(deal => {
-        const { score, detail } = calculateScore(matrix.criteria || [], deal.properties ?? {});
-        const threshold = getScoreThreshold(score, matrix.score_thresholds || []);
-        const healthScore = deal.properties.hs_deal_score
-          ? Math.round(parseFloat(deal.properties.hs_deal_score))
-          : (deal.properties.hs_predictive_deal_score
-            ? Math.round(parseFloat(deal.properties.hs_predictive_deal_score))
-            : null);
-        const trend = 0;
-        const dmi = score != null && healthScore != null
-          ? Math.round((score * 0.35) + (healthScore * 0.45) + (trend * 0.20))
-          : null;
-        return { ...deal, score, detail, threshold, healthScore, dmi };
-      });
-
-      try {
-        const cacheData = {
-          data: dealsWithScores,
-          labels: labelMap,
-          probs: probMap,
-          ts: Date.now(),
-        };
-        sessionStorage.setItem(`${CACHE_KEY}_${tenant.id}`, JSON.stringify(cacheData));
-      } catch (_) {}
-
-      if (stale()) return;
-
-      setDeals(dealsWithScores);
-      setCacheAge(0);
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingStep('');
-
-      // Silent background refresh must not INSERT one row per deal again (deal_scores / deal_momentum_index).
-      if (!silent && !stale()) {
-        saveDealScores(dealsWithScores, matrix, tenant.id);
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      if (!stale()) {
-        setLoading(false);
-        setRefreshing(false);
-        setLoadingStep('');
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (!tenant?.id) {
-      setLoading(false);
-      return;
-    }
-
-    const tenantId = tenant.id;
-    let cancelled = false;
-    const aborted = () => cancelled;
-    fetchGenRef.current += 1;
-    const gen = fetchGenRef.current;
-
-    if (import.meta.env.DEV) {
-      console.log('[dashboard] effect → load', { tenantId, gen });
-    }
-
-    const cacheRaw = sessionStorage.getItem(`${CACHE_KEY}_${tenantId}`);
-    if (cacheRaw) {
-      try {
-        const { data, labels, probs, ts } = JSON.parse(cacheRaw);
-        const age = Date.now() - ts;
-        if (age < CACHE_TTL) {
-          setDeals(data);
-          setStageLabels(labels || {});
-          setStageProbabilities(probs || {});
-          setCacheAge(age);
-          setLoading(false);
-          setRefreshing(true);
-          fetchData(true, { aborted, gen });
-          return () => {
-            cancelled = true;
-          };
-        }
-      } catch (_) {}
-    }
-    fetchData(false, { aborted, gen });
-    return () => {
-      cancelled = true;
-    };
-    // fetchData identity changes each render; we only re-run when tenant id changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenant?.id]);
 
   // ── Categorize deals ─────────────────────────────────────────────────────
   const getProb = (stageId) => {
@@ -631,9 +372,7 @@ const DashboardPage = () => {
             </div>
           )}
           <button onClick={() => {
-            sessionStorage.removeItem(`${CACHE_KEY}_${tenant.id}`);
-            fetchGenRef.current += 1;
-            fetchData(false, { gen: fetchGenRef.current });
+            queryClient.invalidateQueries({ queryKey: ['dashboard_data', tenant?.id] });
           }}
             className="flex items-center gap-1 px-2 py-1 bg-[#0d0d0d] border border-[#1e1e1e] rounded hover:border-[#00FF87] transition-colors">
             <span className={`material-symbols-outlined text-[14px] text-[#555] ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
