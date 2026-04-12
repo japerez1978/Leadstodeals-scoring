@@ -53,7 +53,7 @@ const NeonVal = ({ value, color }) => (
 );
 
 // ─── Deal row component ──────────────────────────────────────────────────────
-const DealRow = ({ deal, stageLabel, probability, navigate, rank, ownerMap, companyMap }) => {
+const DealRow = ({ deal, stageLabel, probability, navigate, rank }) => {
   const pot = deal.score;
   const health = deal.healthScore;
   const dmi = deal.dmi;
@@ -552,8 +552,6 @@ const DashboardPage = () => {
                     probability={getProb(deal.properties.dealstage)}
                     navigate={navigate}
                     rank={i + 1}
-                    ownerMap={ownerMap}
-                    companyMap={companyMap}
                   />
                 ))}
               </tbody>
