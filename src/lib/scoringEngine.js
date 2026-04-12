@@ -10,6 +10,11 @@
  */
 
 export function calculateScore(criteria, dealProperties) {
+  const props =
+    dealProperties != null && typeof dealProperties === 'object' && !Array.isArray(dealProperties)
+      ? dealProperties
+      : {};
+
   let sum = 0;
   let totalWeights = 0;
   const detail = [];
@@ -17,7 +22,7 @@ export function calculateScore(criteria, dealProperties) {
   for (const criterion of criteria) {
     const type = criterion.type || 'enum';
     const config = criterion.config || {};
-    const rawValue = dealProperties[criterion.hubspot_property] ?? null;
+    const rawValue = props[criterion.hubspot_property] ?? null;
     const weight = parseFloat(criterion.weight) || 0;
     totalWeights += weight;
 

@@ -234,15 +234,30 @@ const ScoringPage = () => {
   const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
-    if (tenant) fetchMatrices();
-  }, [tenant]);
+    if (!tenant?.id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    if (import.meta.env.DEV) {
+      console.log('[scoring-config] effect → fetchMatrices', { tenantId: tenant.id });
+    }
+    fetchMatrices({ cancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant?.id]);
 
-  const fetchMatrices = async () => {
+  const fetchMatrices = async (opts = {}) => {
+    const stale = () => opts.cancelled?.() === true;
+    if (!tenant?.id) return;
     try {
       const { data } = await supabase
         .from('scoring_matrices')
         .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
         .eq('tenant_id', tenant.id).order('name');
+      if (stale()) return;
       setMatrices(data);
       setSelectedMatrix((prev) => {
         if (!prev) return data.length > 0 ? data[0] : null;
@@ -251,7 +266,7 @@ const ScoringPage = () => {
     } catch (error) {
       console.error('Error fetching matrices:', error);
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   };
 

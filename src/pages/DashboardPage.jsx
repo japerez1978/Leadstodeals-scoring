@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -220,36 +220,13 @@ const DashboardPage = () => {
   const [ownerMap, setOwnerMap] = useState({});
   const [companyMap, setCompanyMap] = useState({});
 
-  // Live clock
+  // Clock: 1s updates caused full page re-renders (no extra network, but noisy). Minute tick is enough for the header.
   useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
+    const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    if (!tenant) { setLoading(false); return; }
-
-    // Try to load from cache first → instant render
-    const cacheRaw = sessionStorage.getItem(`${CACHE_KEY}_${tenant.id}`);
-    if (cacheRaw) {
-      try {
-        const { data, labels, probs, ts } = JSON.parse(cacheRaw);
-        const age = Date.now() - ts;
-        if (age < CACHE_TTL) {
-          setDeals(data);
-          setStageLabels(labels || {});
-          setStageProbabilities(probs || {});
-          setCacheAge(age);
-          setLoading(false);
-          // Refresh silently in background
-          setRefreshing(true);
-          fetchData(true);
-          return;
-        }
-      } catch (_) {}
-    }
-    fetchData(false);
-  }, [tenant]);
+  const fetchGenRef = useRef(0);
 
   const fetchAllDeals = async () => {
     const properties = [
@@ -314,15 +291,14 @@ const DashboardPage = () => {
   };
 
   const fetchStageLabels = async () => {
+    const labelMap = {};
+    const probMap = {};
     try {
       const res = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/pipelines/deals`);
       const data = await res.json();
-      const labelMap = {};
-      const probMap = {};
       (data.results || []).forEach(pipeline => {
         (pipeline.stages || []).forEach(stage => {
           labelMap[stage.id] = stage.label;
-          // HubSpot provides metadata.probability for each stage
           const prob = stage.metadata?.probability;
           probMap[stage.id] = prob != null ? Math.round(parseFloat(prob) * 100) : null;
         });
@@ -330,6 +306,7 @@ const DashboardPage = () => {
       setStageLabels(labelMap);
       setStageProbabilities(probMap);
     } catch (e) { console.warn('stages error:', e.message); }
+    return { labelMap, probMap };
   };
 
   const saveDealScores = async (deals, matrix, tenantId) => {
@@ -380,8 +357,19 @@ const DashboardPage = () => {
     */
   };
 
-  const fetchData = async (silent = false) => {
+  const fetchData = async (silent = false, opts = {}) => {
+    const { aborted, gen } = opts;
+    const stale = () =>
+      aborted?.() === true || (gen != null && gen !== fetchGenRef.current);
+
     try {
+      if (!tenant?.id) return;
+      if (stale()) return;
+
+      if (import.meta.env.DEV) {
+        console.log('[dashboard/fetchData]', { silent, gen, tenantId: tenant.id });
+      }
+
       if (!silent) setLoadingStep('Cargando matriz...');
 
       const { data: matrix, error: matrixError } = await supabase
@@ -389,15 +377,25 @@ const DashboardPage = () => {
         .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
         .eq('tenant_id', tenant.id).eq('active', true).limit(1).maybeSingle();
 
-      if (matrixError || !matrix) { setDeals([]); setLoading(false); setRefreshing(false); return; }
+      if (stale()) return;
+
+      if (matrixError || !matrix) {
+        setDeals([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
 
       if (!silent) setLoadingStep('Conectando con HubSpot...');
       const hubspotDeals = await fetchAllDeals();
-      await fetchStageLabels();
+      if (stale()) return;
+
+      const { labelMap, probMap } = await fetchStageLabels();
+      if (stale()) return;
 
       if (!silent) setLoadingStep('Calculando scores...');
       const dealsWithScores = hubspotDeals.map(deal => {
-        const { score, detail } = calculateScore(matrix.criteria || [], deal.properties);
+        const { score, detail } = calculateScore(matrix.criteria || [], deal.properties ?? {});
         const threshold = getScoreThreshold(score, matrix.score_thresholds || []);
         const healthScore = deal.properties.hs_deal_score
           ? Math.round(parseFloat(deal.properties.hs_deal_score))
@@ -411,16 +409,17 @@ const DashboardPage = () => {
         return { ...deal, score, detail, threshold, healthScore, dmi };
       });
 
-      // Save to sessionStorage cache
       try {
         const cacheData = {
           data: dealsWithScores,
-          labels: stageLabels,
-          probs: stageProbabilities,
+          labels: labelMap,
+          probs: probMap,
           ts: Date.now(),
         };
         sessionStorage.setItem(`${CACHE_KEY}_${tenant.id}`, JSON.stringify(cacheData));
       } catch (_) {}
+
+      if (stale()) return;
 
       setDeals(dealsWithScores);
       setCacheAge(0);
@@ -428,16 +427,62 @@ const DashboardPage = () => {
       setRefreshing(false);
       setLoadingStep('');
 
-      // Fire-and-forget (saves to Supabase only, HubSpot write disabled)
-      saveDealScores(dealsWithScores, matrix, tenant.id);
-      // writeScoresToHubSpot(dealsWithScores); // Disabled due to CORS issues
+      // Silent background refresh must not INSERT one row per deal again (deal_scores / deal_momentum_index).
+      if (!silent && !stale()) {
+        saveDealScores(dealsWithScores, matrix, tenant.id);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingStep('');
+      if (!stale()) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingStep('');
+      }
     }
   };
+
+  useEffect(() => {
+    if (!tenant?.id) {
+      setLoading(false);
+      return;
+    }
+
+    const tenantId = tenant.id;
+    let cancelled = false;
+    const aborted = () => cancelled;
+    fetchGenRef.current += 1;
+    const gen = fetchGenRef.current;
+
+    if (import.meta.env.DEV) {
+      console.log('[dashboard] effect → load', { tenantId, gen });
+    }
+
+    const cacheRaw = sessionStorage.getItem(`${CACHE_KEY}_${tenantId}`);
+    if (cacheRaw) {
+      try {
+        const { data, labels, probs, ts } = JSON.parse(cacheRaw);
+        const age = Date.now() - ts;
+        if (age < CACHE_TTL) {
+          setDeals(data);
+          setStageLabels(labels || {});
+          setStageProbabilities(probs || {});
+          setCacheAge(age);
+          setLoading(false);
+          setRefreshing(true);
+          fetchData(true, { aborted, gen });
+          return () => {
+            cancelled = true;
+          };
+        }
+      } catch (_) {}
+    }
+    fetchData(false, { aborted, gen });
+    return () => {
+      cancelled = true;
+    };
+    // fetchData identity changes each render; we only re-run when tenant id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant?.id]);
 
   // ── Categorize deals ─────────────────────────────────────────────────────
   const getProb = (stageId) => {
@@ -568,7 +613,7 @@ const DashboardPage = () => {
             DEAL INTELLIGENCE TERMINAL
           </h1>
           <p className="text-[10px] text-[#3a3a3a] mt-0.5">
-            {deals.length} activos &middot; Última actualización {clock.toLocaleTimeString('es-ES')}
+            {deals.length} activos &middot; Última actualización {clock.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -585,7 +630,11 @@ const DashboardPage = () => {
               </span>
             </div>
           )}
-          <button onClick={() => { sessionStorage.removeItem(`${CACHE_KEY}_${tenant.id}`); fetchData(false); }}
+          <button onClick={() => {
+            sessionStorage.removeItem(`${CACHE_KEY}_${tenant.id}`);
+            fetchGenRef.current += 1;
+            fetchData(false, { gen: fetchGenRef.current });
+          }}
             className="flex items-center gap-1 px-2 py-1 bg-[#0d0d0d] border border-[#1e1e1e] rounded hover:border-[#00FF87] transition-colors">
             <span className={`material-symbols-outlined text-[14px] text-[#555] ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
           </button>
@@ -779,7 +828,7 @@ const DashboardPage = () => {
             {filtered.length} de {deals.length} deals &middot; CAL=Calidad &middot; SAL=Salud &middot; DMI=Momentum
           </span>
           <span className="text-[9px] font-mono text-[#3a3a3a]">
-            {clock.toLocaleTimeString('es-ES')}
+            {clock.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
       </div>

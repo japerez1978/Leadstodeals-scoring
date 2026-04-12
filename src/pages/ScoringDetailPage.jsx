@@ -102,16 +102,28 @@ const ScoringDetailPage = () => {
   const [hubspotUrl, setHubspotUrl] = useState(null);
 
   useEffect(() => {
-    if (tenant && dealId) fetchDetails();
-  }, [tenant, dealId]);
+    if (!tenant?.id || !dealId) return;
+    let cancelled = false;
+    if (import.meta.env.DEV) {
+      console.log('[deal-detail] effect → fetchDetails', { tenantId: tenant.id, dealId });
+    }
+    fetchDetails({ cancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant?.id, dealId]);
 
-  const fetchDetails = async () => {
+  const fetchDetails = async (opts = {}) => {
+    const stale = () => opts.cancelled?.() === true;
     try {
       // Matrix
       const { data: matrix } = await supabase
         .from('scoring_matrices')
         .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
         .eq('tenant_id', tenant.id).eq('active', true).limit(1).maybeSingle();
+
+      if (stale()) return;
 
       // Stage labels
       try {
@@ -121,6 +133,8 @@ const ScoringDetailPage = () => {
         (d.results || []).forEach(p => (p.stages || []).forEach(s => { map[s.id] = s.label; }));
         setStageLabels(map);
       } catch (e) { console.warn(e); }
+
+      if (stale()) return;
 
       // Portal ID
       let portalId = tenant?.hubspot_portal_id;
@@ -136,6 +150,8 @@ const ScoringDetailPage = () => {
         ? `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`
         : `https://app.hubspot.com/contacts/deal/${dealId}`
       );
+
+      if (stale()) return;
 
       // Deal + propertiesWithHistory for health score
       // ⚠️ Dual property fetch: hs_deal_score (internal name in HubSpot) + hs_predictive_deal_score (API name)
@@ -155,9 +171,25 @@ const ScoringDetailPage = () => {
       );
       const dealData = await res.json();
 
+      if (stale()) return;
+
+      if (
+        !res.ok
+        || !dealData?.properties
+        || typeof dealData.properties !== 'object'
+        || Array.isArray(dealData.properties)
+      ) {
+        if (import.meta.env.DEV) {
+          console.warn('[deal-detail] deal fetch invalid or error', { status: res.status, dealId, dealData });
+        }
+        if (!stale()) setDeal(null);
+        return;
+      }
+
       // Calculate potencialidad score
       const { score, detail } = calculateScore(matrix?.criteria || [], dealData.properties);
       const threshold = getScoreThreshold(score, matrix?.score_thresholds || []);
+      if (stale()) return;
       setDeal({ ...dealData, score, detail, threshold });
 
       // Build chart data: check both property names (hs_deal_score vs hs_predictive_deal_score)
@@ -171,6 +203,7 @@ const ScoringDetailPage = () => {
         .reverse();  // oldest first
 
       // Store HubSpot history for accurate delta calculation
+      if (stale()) return;
       setHsHealthHistory(hsHistory);
 
       // Save latest health score snapshot to Supabase (if changed)
@@ -202,6 +235,8 @@ const ScoringDetailPage = () => {
           .limit(1)
           .maybeSingle();
 
+        if (stale()) return;
+
         if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
           await supabase.from('deal_health_scores').insert({
             tenant_id: tenant.id,
@@ -212,6 +247,8 @@ const ScoringDetailPage = () => {
             source: 'poll',
           });
         }
+
+        if (stale()) return;
 
         // Fetch all our saved snapshots for the chart
         const { data: savedHistory } = await supabase
@@ -232,6 +269,7 @@ const ScoringDetailPage = () => {
           label: formatChartDate(d.ts, i, arr.length),
         }));
 
+        if (stale()) return;
         setHealthChartData(chartData);
 
         // Also load DMI historical data
@@ -245,6 +283,7 @@ const ScoringDetailPage = () => {
               value: d.value,
               label: formatChartDate(d.ts, i, arr.length),
             }));
+            if (stale()) return;
             setDmiChartData(dmiChartData);
           }
         }
@@ -252,7 +291,7 @@ const ScoringDetailPage = () => {
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   };
 
@@ -298,19 +337,39 @@ const ScoringDetailPage = () => {
     </div>
   );
 
+  const p = deal.properties && typeof deal.properties === 'object' && !Array.isArray(deal.properties)
+    ? deal.properties
+    : {};
+  if (Object.keys(p).length === 0) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4">
+        <span className="material-symbols-outlined text-[64px] mb-4" style={{ color: '#3a3a3a' }}>cloud_off</span>
+        <p className="font-mono text-sm mb-2" style={{ color: '#555' }}>No se pudieron cargar las propiedades del deal</p>
+        <p className="font-mono text-[10px] mb-4 max-w-md" style={{ color: '#444' }}>
+          Revisa el proxy / permisos de HubSpot o que el ID del deal sea válido.
+        </p>
+        <button onClick={() => navigate('/dashboard')}
+          className="font-mono text-xs uppercase tracking-widest px-4 py-2 rounded border transition-colors"
+          style={{ borderColor: NEON.green + '40', color: NEON.green, background: NEON.green + '10' }}>
+          ← Volver al Dashboard
+        </button>
+      </div>
+    );
+  }
+
   const potScore = deal.score;
   // Extract health score from whichever property has the value
-  const healthScore = deal.properties.hs_deal_score
-    ? Math.round(parseFloat(deal.properties.hs_deal_score))
-    : (deal.properties.hs_predictive_deal_score
-        ? Math.round(parseFloat(deal.properties.hs_predictive_deal_score))
+  const healthScore = p.hs_deal_score
+    ? Math.round(parseFloat(p.hs_deal_score))
+    : (p.hs_predictive_deal_score
+        ? Math.round(parseFloat(p.hs_predictive_deal_score))
         : null);
   // Delta from HubSpot's real history (not our Supabase snapshots which may all be the same)
   const prevHealth = hsHealthHistory.length >= 2
     ? hsHealthHistory[hsHealthHistory.length - 2]?.value : null;
   const healthDelta = healthScore != null && prevHealth != null ? healthScore - prevHealth : null;
 
-  const daysCreated = daysSince(deal.properties.hs_createdate);
+  const daysCreated = daysSince(p.hs_createdate);
 
   // Calculate days in current stage
   const daysInStage = (() => {
@@ -322,7 +381,7 @@ const ScoringDetailPage = () => {
     return daysSince(latestEntry.timestamp);
   })();
 
-  const stageLabel = getStageLabel(deal.properties.dealstage);
+  const stageLabel = getStageLabel(p.dealstage);
 
   // Calculate DMI (Deal Momentum Index)
   // DMI = (Score 1 × 0.35) + (Score 2 × 0.45) + (Tendencia × 0.20)
@@ -362,7 +421,7 @@ const ScoringDetailPage = () => {
 
       <div className="flex items-start justify-between gap-4">
         <h1 className="font-black leading-tight" style={{ fontSize: '1.75rem', color: '#e8ffe8', textShadow: '0 0 20px rgba(0,255,135,0.2)' }}>
-          {deal.properties.dealname}
+          {p.dealname || '—'}
         </h1>
         <div className="flex gap-2 shrink-0">
           <a href={hubspotUrl} target="_blank" rel="noopener noreferrer"
@@ -371,7 +430,7 @@ const ScoringDetailPage = () => {
             <span className="material-symbols-outlined text-[13px]">open_in_new</span>
             HubSpot
           </a>
-          <button onClick={fetchDetails}
+          <button onClick={() => fetchDetails({})}
             className="flex items-center gap-1.5 px-3 py-2 rounded text-xs font-mono uppercase tracking-widest transition-colors"
             style={{ backgroundColor: '#111', color: '#555', border: '1px solid #222' }}
             onMouseEnter={e => e.currentTarget.style.color = '#fff'}
@@ -413,20 +472,20 @@ const ScoringDetailPage = () => {
               )}
             </div>
             <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-              {deal.properties.valor_actual && (
-                <Prop icon="payments" label="Valor" value={`€${parseFloat(deal.properties.valor_actual).toLocaleString()}`} />
+              {p.valor_actual && (
+                <Prop icon="payments" label="Valor" value={`€${parseFloat(p.valor_actual).toLocaleString()}`} />
               )}
-              {deal.properties.sector_partida && (
-                <Prop icon="category" label="Sector" value={deal.properties.sector_partida} />
+              {p.sector_partida && (
+                <Prop icon="category" label="Sector" value={p.sector_partida} />
               )}
-              {deal.properties.ubicacion_provincia_obra__proyecto && (
-                <Prop icon="location_on" label="Provincia" value={deal.properties.ubicacion_provincia_obra__proyecto} />
+              {p.ubicacion_provincia_obra__proyecto && (
+                <Prop icon="location_on" label="Provincia" value={p.ubicacion_provincia_obra__proyecto} />
               )}
-              {deal.properties.tipo_de_obra__proyecto && (
-                <Prop icon="construction" label="Tipo" value={deal.properties.tipo_de_obra__proyecto} />
+              {p.tipo_de_obra__proyecto && (
+                <Prop icon="construction" label="Tipo" value={p.tipo_de_obra__proyecto} />
               )}
-              {deal.properties.madurez_en_adjudicacion_obra__proyecto && (
-                <Prop icon="task_alt" label="Estado" value={deal.properties.madurez_en_adjudicacion_obra__proyecto} />
+              {p.madurez_en_adjudicacion_obra__proyecto && (
+                <Prop icon="task_alt" label="Estado" value={p.madurez_en_adjudicacion_obra__proyecto} />
               )}
             </div>
           </div>
@@ -475,8 +534,8 @@ const ScoringDetailPage = () => {
               {stageLabel && <Prop icon="swap_horiz" label="Etapa" value={stageLabel} />}
               {daysCreated != null && <Prop icon="calendar_today" label="Creación" value={`${daysCreated}d`} />}
               {daysInStage != null && <Prop icon="schedule" label="En etapa" value={`${daysInStage}d`} />}
-              <Prop icon="event_available" label="Últ. actividad" value={formatDate(deal.properties.notes_last_activity) || '—'} />
-              <Prop icon="event_upcoming" label="Próx. actividad" value={formatDate(deal.properties.hs_next_activity_date)} highlight />
+              <Prop icon="event_available" label="Últ. actividad" value={formatDate(p.notes_last_activity) || '—'} />
+              <Prop icon="event_upcoming" label="Próx. actividad" value={formatDate(p.hs_next_activity_date)} highlight />
             </div>
           </div>
         </div>
@@ -529,7 +588,7 @@ const ScoringDetailPage = () => {
               <div>
                 <p className="font-mono text-xs font-bold uppercase tracking-widest" style={{ color: NEON.blue }}>SAL · Evolución</p>
                 <p className="font-mono text-[9px] mt-0.5" style={{ color: '#333' }}>
-                  {deal.properties.hs_deal_score ? 'hs_deal_score' : 'hs_predictive_deal_score'} · HubSpot AI
+                  {p.hs_deal_score ? 'hs_deal_score' : 'hs_predictive_deal_score'} · HubSpot AI
                 </p>
               </div>
               <span className="font-mono text-[9px]" style={{ color: '#333' }}>{healthChartData.length} pts</span>
