@@ -8,12 +8,12 @@ import Spinner from '../components/Spinner';
 // ─── SVG Stock Chart ──────────────────────────────────────────────────────────
 const StockChart = ({ data, color }) => {
   if (!data || data.length < 2) return null;
-  const W = 800; const H = 120; const PAD = 10;
+  const W = 800; const H = 150; const PAD = 20;
   const values = data.map(d => d.value);
-  const min = Math.min(...values) - 8;
-  const max = Math.max(...values) + 8;
+  const min = Math.min(...values) - 10;
+  const max = Math.max(...values) + 10;
   const sx = (i) => PAD + (i / (data.length - 1)) * (W - PAD * 2);
-  const sy = (v) => H - PAD - ((v - min) / (max - min)) * (H - PAD * 2 - 12);
+  const sy = (v) => H - PAD - ((v - min) / (max - min)) * (H - PAD * 2 - 20);
   const pts = data.map((d, i) => `${sx(i)},${sy(d.value)}`).join(' ');
   const area = `${sx(0)},${H} ${pts} ${sx(data.length - 1)},${H}`;
   const gradId = `grad${color.replace('#', '')}`;
@@ -21,27 +21,33 @@ const StockChart = ({ data, color }) => {
   const lastY = sy(values[values.length - 1]);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 120 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 140 }}>
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+          <stop offset="0%"   stopColor={color} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.05" />
         </linearGradient>
       </defs>
       {[25, 50, 75].map(v => {
         const y = sy(v);
         if (y < 0 || y > H) return null;
-        return <line key={v} x1={PAD} x2={W - PAD} y1={y} y2={y} stroke="#44474a" strokeWidth="0.5" strokeDasharray="4,4" />;
+        return <line key={v} x1={PAD} x2={W - PAD} y1={y} y2={y} stroke="#2a2a2a" strokeWidth="1" strokeDasharray="6,4" opacity="0.5" />;
       })}
       <polygon points={area} fill={`url(#${gradId})`} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {data.map((d, i) => {
+        const x = sx(i);
+        const y = sy(d.value);
+        return (
+          <g key={i}>
+            <circle cx={x} cy={y} r="4" fill="#131313" stroke={color} strokeWidth="2.5" />
+            <text x={x} y={y - 12} fill={color} fontSize="11" fontWeight="900" textAnchor="middle" letterSpacing="0.5">{d.value}</text>
+          </g>
+        );
+      })}
+      <circle cx={lastX} cy={lastY} r="6" fill={color} opacity="0.9" />
       {data.map((d, i) => (
-        <circle key={i} cx={sx(i)} cy={sy(d.value)} r="3" fill="#131313" stroke={color} strokeWidth="2" />
-      ))}
-      <circle cx={lastX} cy={lastY} r="5" fill={color} />
-      <text x={lastX + 8} y={lastY + 4} fill={color} fontSize="11" fontWeight="bold">{values[values.length - 1]}</text>
-      {data.map((d, i) => (
-        <text key={i} x={sx(i)} y={H} fill="#44474a" fontSize="9" textAnchor="middle">{d.label}</text>
+        <text key={i} x={sx(i)} y={H - 2} fill="#666" fontSize="10" fontWeight="500" textAnchor="middle">{d.label}</text>
       ))}
     </svg>
   );
@@ -73,6 +79,7 @@ const ScoringDetailPage = () => {
 
   const [deal, setDeal] = useState(null);
   const [healthChartData, setHealthChartData] = useState([]);
+  const [dmiChartData, setDmiChartData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stageLabels, setStageLabels] = useState({});
   const [hubspotUrl, setHubspotUrl] = useState(null);
@@ -114,8 +121,11 @@ const ScoringDetailPage = () => {
       );
 
       // Deal + propertiesWithHistory for health score
+      // ⚠️ Dual property fetch: hs_deal_score (internal name in HubSpot) + hs_predictive_deal_score (API name)
       const props = [
-        'dealname', 'amount', 'dealstage', 'hs_predictive_deal_score',
+        'dealname', 'amount', 'dealstage',
+        'hs_deal_score',               // Internal name in HubSpot ("Calificación de negocios")
+        'hs_predictive_deal_score',    // Standard HubSpot API field
         'hs_createdate', 'notes_last_activity', 'hs_next_activity_date',
         'unidad_de_negocio_deal', 'prioridad_de_obra__proyecto',
         'ubicacion_provincia_obra__proyecto', 'madurez_en_adjudicacion_obra__proyecto',
@@ -124,7 +134,7 @@ const ScoringDetailPage = () => {
       ];
       const res = await fetch(
         `${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/objects/deals/${dealId}` +
-        `?properties=${props.join(',')}&propertiesWithHistory=hs_predictive_deal_score`
+        `?properties=${props.join(',')}&propertiesWithHistory=hs_deal_score,hs_predictive_deal_score,dealstage`
       );
       const dealData = await res.json();
 
@@ -133,34 +143,52 @@ const ScoringDetailPage = () => {
       const threshold = getScoreThreshold(score, matrix?.score_thresholds || []);
       setDeal({ ...dealData, score, detail, threshold });
 
-      // Build chart data: first merge propertiesWithHistory (oldest→newest) + our saved snapshots
-      const hsHistory = (dealData.propertiesWithHistory?.hs_predictive_deal_score || [])
+      // Build chart data: check both property names (hs_deal_score vs hs_predictive_deal_score)
+      // Use whichever one has data (priority: hs_deal_score first, fall back to hs_predictive_deal_score)
+      const healthScoreProp = dealData.properties.hs_deal_score
+        ? 'hs_deal_score'
+        : 'hs_predictive_deal_score';
+      const hsHistory = (dealData.propertiesWithHistory?.[healthScoreProp] || [])
         .map(h => ({ value: Math.round(parseFloat(h.value)), ts: new Date(h.timestamp) }))
         .filter(h => !isNaN(h.value))
         .reverse();  // oldest first
 
       // Save latest health score snapshot to Supabase (if changed)
-      const currentHealth = dealData.properties.hs_predictive_deal_score
-        ? Math.round(parseFloat(dealData.properties.hs_predictive_deal_score))
+      const currentHealth = dealData.properties[healthScoreProp]
+        ? Math.round(parseFloat(dealData.properties[healthScoreProp]))
         : null;
 
       if (currentHealth !== null) {
+        // Calculate DMI for saving
+        // Get previous health score from history to calculate trend
+        const prevHealthForSave = hsHistory.length >= 2
+          ? hsHistory[hsHistory.length - 2]?.value
+          : null;
+        const healthDeltaForSave = currentHealth != null && prevHealthForSave != null
+          ? currentHealth - prevHealthForSave
+          : null;
+        const healthTrendForSave = healthDeltaForSave != null ? Math.max(-20, Math.min(20, healthDeltaForSave * 5)) : 0;
+        const dmiForSave = score != null && currentHealth != null
+          ? Math.round((score * 0.35) + (currentHealth * 0.45) + (healthTrendForSave * 0.20))
+          : null;
+
         // Check last saved value
         const { data: lastSaved } = await supabase
           .from('deal_health_scores')
-          .select('score')
+          .select('score, dmi')
           .eq('tenant_id', tenant.id)
           .eq('hubspot_deal_id', dealId)
           .order('recorded_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (!lastSaved || lastSaved.score !== currentHealth) {
+        if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
           await supabase.from('deal_health_scores').insert({
             tenant_id: tenant.id,
             hubspot_deal_id: dealId,
             deal_name: dealData.properties.dealname,
             score: currentHealth,
+            dmi: dmiForSave,
             source: 'poll',
           });
         }
@@ -168,7 +196,7 @@ const ScoringDetailPage = () => {
         // Fetch all our saved snapshots for the chart
         const { data: savedHistory } = await supabase
           .from('deal_health_scores')
-          .select('score, recorded_at')
+          .select('score, dmi, recorded_at')
           .eq('tenant_id', tenant.id)
           .eq('hubspot_deal_id', dealId)
           .order('recorded_at', { ascending: true });
@@ -187,6 +215,23 @@ const ScoringDetailPage = () => {
           }));
 
         setHealthChartData(chartData);
+
+        // Also load DMI historical data
+        if (savedHistory && savedHistory.length > 0) {
+          const dmiData = savedHistory
+            .filter(r => r.dmi != null)
+            .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
+
+          if (dmiData.length > 1) {
+            const dmiChartData = dmiData
+              .filter((d, i, arr) => i === 0 || d.value !== arr[i - 1].value)
+              .map((d, i, arr) => ({
+                value: d.value,
+                label: formatChartDate(d.ts, i, arr.length),
+              }));
+            setDmiChartData(dmiChartData);
+          }
+        }
       }
     } catch (err) {
       console.error(err);
@@ -239,14 +284,44 @@ const ScoringDetailPage = () => {
   );
 
   const potScore = deal.score;
-  const healthScore = deal.properties.hs_predictive_deal_score
-    ? Math.round(parseFloat(deal.properties.hs_predictive_deal_score)) : null;
+  // Extract health score from whichever property has the value
+  const healthScore = deal.properties.hs_deal_score
+    ? Math.round(parseFloat(deal.properties.hs_deal_score))
+    : (deal.properties.hs_predictive_deal_score
+        ? Math.round(parseFloat(deal.properties.hs_predictive_deal_score))
+        : null);
   const prevHealth = healthChartData.length >= 2
     ? healthChartData[healthChartData.length - 2]?.value : null;
   const healthDelta = healthScore != null && prevHealth != null ? healthScore - prevHealth : null;
 
   const daysCreated = daysSince(deal.properties.hs_createdate);
+
+  // Calculate days in current stage
+  const daysInStage = (() => {
+    const stageHistory = deal.propertiesWithHistory?.dealstage || [];
+    if (stageHistory.length === 0) return null;
+    // Most recent entry is the current stage
+    const latestEntry = stageHistory[stageHistory.length - 1];
+    if (!latestEntry) return null;
+    return daysSince(latestEntry.timestamp);
+  })();
+
   const stageLabel = getStageLabel(deal.properties.dealstage);
+
+  // Calculate DMI (Deal Momentum Index)
+  // DMI = (Score 1 × 0.35) + (Score 2 × 0.45) + (Tendencia × 0.20)
+  const healthTrend = healthDelta != null ? Math.max(-20, Math.min(20, healthDelta * 5)) : 0; // -20 to +20
+  const dmi = potScore != null && healthScore != null
+    ? Math.round((potScore * 0.35) + (healthScore * 0.45) + (healthTrend * 0.20))
+    : null;
+  const getDmiStatus = (value) => {
+    if (value == null) return { label: 'N/A', icon: '?', color: '#44474a', bg: 'bg-[#44474a]/5' };
+    if (value >= 75) return { label: 'Acelerar', icon: '🟢', color: '#4ade80', bg: 'border-green-500/20 bg-green-500/5' };
+    if (value >= 50) return { label: 'Vigilar', icon: '🟡', color: '#facc15', bg: 'border-yellow-500/20 bg-yellow-500/5' };
+    if (value >= 25) return { label: 'Rescatar', icon: '🔴', color: '#f87171', bg: 'border-red-500/20 bg-red-500/5' };
+    return { label: 'Soltar', icon: '⚫', color: '#888888', bg: 'border-[#44474a] bg-[#44474a]/5' };
+  };
+  const dmiStatus = getDmiStatus(dmi);
 
   return (
     <div className="space-y-5">
@@ -262,15 +337,15 @@ const ScoringDetailPage = () => {
         {deal.properties.dealname}
       </h1>
 
-      {/* ── Dual score cards ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Dual score cards + DMI ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        {/* Score de Potencialidad */}
+        {/* Deal Potentiality Score */}
         <div className={`border rounded-xl p-5 ${sb(potScore)} ${sbg(potScore)}`}>
           <p className="text-[9px] font-bold uppercase tracking-widest text-[#c5c6ca] mb-3">
-            Score de Potencialidad
+            Deal Potentiality Score
           </p>
-          <div className="flex items-stretch gap-5">
+          <div className="flex items-center gap-5">
             <div className="flex items-end gap-2 shrink-0">
               <span className="font-black" style={{ fontSize: '5.5rem', color: sc(potScore), lineHeight: 1 }}>
                 {potScore}
@@ -283,13 +358,21 @@ const ScoringDetailPage = () => {
               )}
             </div>
             <div className="flex-1 border-l border-[#44474a]/40 pl-5 flex flex-col justify-center gap-3">
-              {deal.properties.amount && (
-                <Prop icon="payments" label="Importe"
-                  value={`€${parseFloat(deal.properties.amount).toLocaleString()}`} />
+              {deal.properties.valor_actual && (
+                <Prop icon="payments" label="Valor"
+                  value={`€${parseFloat(deal.properties.valor_actual).toLocaleString()}`} />
               )}
-              {stageLabel && <Prop icon="swap_horiz" label="Etapa" value={stageLabel} />}
-              {daysCreated != null && (
-                <Prop icon="schedule" label="Días desde creación" value={`${daysCreated} días`} />
+              {deal.properties.sector_partida && (
+                <Prop icon="category" label="Sector" value={deal.properties.sector_partida} />
+              )}
+              {deal.properties.ubicacion_provincia_obra__proyecto && (
+                <Prop icon="location_on" label="Provincia" value={deal.properties.ubicacion_provincia_obra__proyecto} />
+              )}
+              {deal.properties.tipo_de_obra__proyecto && (
+                <Prop icon="construction" label="Tipo de Partida" value={deal.properties.tipo_de_obra__proyecto} />
+              )}
+              {deal.properties.madurez_en_adjudicacion_obra__proyecto && (
+                <Prop icon="task_alt" label="Estado de Partida" value={deal.properties.madurez_en_adjudicacion_obra__proyecto} />
               )}
             </div>
           </div>
@@ -304,15 +387,24 @@ const ScoringDetailPage = () => {
           </div>
 
           {healthScore != null ? (
-            <div className="flex items-stretch gap-5">
+            <div className="flex items-center gap-5">
               <div className="shrink-0">
                 <div className="flex items-end gap-2">
                   <span className="font-black" style={{ fontSize: '5.5rem', color: sc(healthScore), lineHeight: 1 }}>
                     {healthScore}
                   </span>
+                  {(() => {
+                    const label = healthScore < 50 ? 'BAJO' : healthScore < 75 ? 'MEDIO' : 'ALTO';
+                    return (
+                      <span className="mb-1.5 px-2 py-0.5 rounded-full text-xs font-bold uppercase border"
+                        style={{ color: sc(healthScore), borderColor: sc(healthScore) + '50', backgroundColor: sc(healthScore) + '15' }}>
+                        {label}
+                      </span>
+                    );
+                  })()}
                 </div>
                 {healthDelta !== null && (
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="flex items-center gap-1 mt-3">
                     <span className="material-symbols-outlined text-[16px]"
                       style={{ color: healthDelta >= 0 ? '#4ade80' : '#f87171' }}>
                       {healthDelta >= 0 ? 'trending_up' : 'trending_down'}
@@ -327,6 +419,12 @@ const ScoringDetailPage = () => {
               </div>
               <div className="flex-1 border-l border-[#44474a]/40 pl-5 flex flex-col justify-center gap-3">
                 {stageLabel && <Prop icon="swap_horiz" label="Etapa" value={stageLabel} />}
+                {daysCreated != null && (
+                  <Prop icon="calendar_today" label="Días desde creación" value={`${daysCreated} días`} />
+                )}
+                {daysInStage != null && (
+                  <Prop icon="schedule" label="Días en etapa actual" value={`${daysInStage} días`} />
+                )}
                 <Prop icon="event_available" label="Última actividad"
                   value={formatDate(deal.properties.notes_last_activity) || 'Sin actividad'} />
                 <Prop icon="event_upcoming" label="Próxima actividad"
@@ -346,6 +444,37 @@ const ScoringDetailPage = () => {
             Probabilidad de cierre · se actualiza automáticamente cada ~6h
           </p>
         </div>
+
+        {/* Deal Momentum Index */}
+        <div className={`border rounded-xl p-5 ${dmiStatus.bg}`} style={{ borderColor: dmiStatus.color + '50' }}>
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#c5c6ca] mb-3">
+            Deal Momentum Index
+          </p>
+          <div className="flex items-center gap-5">
+            <div className="flex items-end gap-2 shrink-0">
+              <span className="font-black" style={{ fontSize: '5.5rem', color: dmiStatus.color, lineHeight: 1 }}>
+                {dmi}
+              </span>
+              {dmi != null && (
+                <span className="mb-1.5 px-2 py-0.5 rounded-full text-xs font-bold uppercase border"
+                  style={{ color: dmiStatus.color, borderColor: dmiStatus.color + '50', backgroundColor: dmiStatus.color + '15' }}>
+                  {dmiStatus.label}
+                </span>
+              )}
+            </div>
+            <div className="flex-1 border-l border-[#44474a]/40 pl-5 flex flex-col justify-center gap-3">
+              <Prop icon="flash_on" label="Potenciality"
+                value={potScore ? `${potScore} / 100` : '—'} />
+              <Prop icon="favorite" label="Salud"
+                value={healthScore ? `${healthScore} / 100` : '—'} />
+              <Prop icon="trending_up" label="Tendencia"
+                value={healthDelta != null ? (healthDelta >= 0 ? `↑ +${healthDelta}` : `↓ ${healthDelta}`) : '—'} />
+            </div>
+          </div>
+          <p className="text-[#44474a] text-[10px] mt-3">
+            35% calidad + 45% salud + 20% tendencia
+          </p>
+        </div>
       </div>
 
       {/* ── Buttons ── */}
@@ -363,22 +492,44 @@ const ScoringDetailPage = () => {
         </button>
       </div>
 
-      {/* ── Health Score Chart ── */}
-      {healthChartData.length >= 2 && (
-        <div className="bg-[#1c1b1c] border border-[#44474a] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-white font-semibold text-sm">Evolución Deal Health Score</p>
-              <p className="text-[#44474a] text-xs mt-0.5">hs_predictive_deal_score · HubSpot AI</p>
+      {/* ── Charts: Health Score + DMI ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Health Score Chart */}
+        {healthChartData.length >= 2 && (
+          <div className="bg-[#1c1b1c] border border-[#44474a] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-white font-semibold text-sm">Evolución Health Score</p>
+                <p className="text-[#44474a] text-xs mt-0.5">
+                  {deal.properties.hs_deal_score ? 'hs_deal_score' : 'hs_predictive_deal_score'} · HubSpot AI
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sc(healthScore) }} />
+                <span className="text-[#c5c6ca] text-xs">{healthChartData.length} registros</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sc(healthScore) }} />
-              <span className="text-[#c5c6ca] text-xs">{healthChartData.length} registros</span>
-            </div>
+            <StockChart data={healthChartData} color="#00FA9A" />
           </div>
-          <StockChart data={healthChartData} color={sc(healthScore)} />
-        </div>
-      )}
+        )}
+
+        {/* DMI Chart */}
+        {dmiChartData.length >= 2 && (
+          <div className="bg-[#1c1b1c] border border-[#44474a] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-white font-semibold text-sm">Evolución Deal Momentum Index</p>
+                <p className="text-[#44474a] text-xs mt-0.5">35% calidad + 45% salud + 20% tendencia</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: dmi != null && dmi >= 75 ? '#4ade80' : dmi >= 50 ? '#facc15' : dmi >= 25 ? '#f87171' : '#888888' }} />
+                <span className="text-[#c5c6ca] text-xs">{dmiChartData.length} registros</span>
+              </div>
+            </div>
+            <StockChart data={dmiChartData} color={dmi != null && dmi >= 75 ? '#4ade80' : dmi >= 50 ? '#facc15' : dmi >= 25 ? '#f87171' : '#888888'} />
+          </div>
+        )}
+      </div>
 
       {/* ── Criterion Breakdown ── */}
       <div>
@@ -396,7 +547,13 @@ const ScoringDetailPage = () => {
                 <div key={idx} className="bg-[#1c1b1c] border border-[#44474a] rounded-xl p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0 pr-2">
-                      <h3 className="text-white text-xs font-semibold leading-tight">{item.criterion}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-white text-xs font-semibold leading-tight">{item.criterion}</h3>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap"
+                          style={{ color: textColor, backgroundColor: textColor + '15', border: `1px solid ${textColor}40` }}>
+                          {pos ? '+' : ''}{pts.toFixed(1)}
+                        </span>
+                      </div>
                       <p className="text-[10px] mt-0.5">
                         <span className="text-[#44474a]">Matched: </span>
                         <span className="text-white font-medium">{item.matchedLabel || '—'}</span>
