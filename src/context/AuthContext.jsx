@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
@@ -14,6 +14,10 @@ export const AuthProvider = ({ children }) => {
   const [tenant, setTenant] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // After tab focus, GoTrue may emit SIGNED_IN several times → coalesce tenant_users fetches.
+  const TENANT_FETCH_COOLDOWN_MS = 8000;
+  const lastTenantFetchRef = useRef({ userId: null, at: 0 });
 
   const fetchTenant = useCallback(async (authUserId) => {
     const { data, error } = await supabase
@@ -50,10 +54,19 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
           return;
         }
+        const uid = session.user.id;
+        const now = Date.now();
+        const { userId: prevUid, at } = lastTenantFetchRef.current;
+        if (prevUid === uid && now - at < TENANT_FETCH_COOLDOWN_MS) {
+          setLoading(false);
+          return;
+        }
+        lastTenantFetchRef.current = { userId: uid, at: now };
         setTimeout(() => {
-          fetchTenant(session.user.id).finally(() => setLoading(false));
+          fetchTenant(uid).finally(() => setLoading(false));
         }, 0);
       } else {
+        lastTenantFetchRef.current = { userId: null, at: 0 };
         setTenant(null);
         setUserRole(null);
         setLoading(false);
