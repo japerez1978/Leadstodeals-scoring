@@ -146,3 +146,146 @@ export const useDashboardData = (tenantId) => {
     enabled: !!tenantId,
   });
 };
+
+const formatChartDate = (d, i, total) => {
+  if (i === total - 1) return 'HOY';
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).toUpperCase();
+};
+
+export const useDealDetails = (tenantId, dealId) => {
+  return useQuery({
+    queryKey: ['deal_details', tenantId, dealId],
+    queryFn: async () => {
+      // 1. Matrix
+      const { data: matrix } = await supabase
+        .from('scoring_matrices')
+        .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
+        .eq('tenant_id', tenantId).eq('active', true).limit(1).maybeSingle();
+
+      // 2. Stage labels
+      const labelMap = {};
+      try {
+        const r = await fetch(`${HUBSPOT_PROXY_URL}/pipelines/deals`);
+        const d = await r.json();
+        (d.results || []).forEach(p => (p.stages || []).forEach(s => { labelMap[s.id] = s.label; }));
+      } catch (e) { console.warn('pipelines error:', e); }
+
+      // 3. Portal / Hubspot URL
+      let portalId = null;
+      try {
+        const { data: tData } = await supabase.from('tenants').select('hubspot_portal_id').eq('id', tenantId).single();
+        if (tData?.hubspot_portal_id) {
+          portalId = tData.hubspot_portal_id;
+        } else {
+          const r = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/account-info/v3/details`);
+          const d = await r.json();
+          portalId = d.portalId;
+          if (portalId) await supabase.from('tenants').update({ hubspot_portal_id: String(portalId) }).eq('id', tenantId);
+        }
+      } catch (e) {
+        console.warn('portal id error:', e);
+      }
+      const hubspotUrl = portalId
+        ? `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`
+        : `https://app.hubspot.com/contacts/deal/${dealId}`;
+
+      // 4. Deal Properties
+      const props = [
+        'dealname', 'amount', 'dealstage', 'hs_deal_score', 'hs_predictive_deal_score',
+        'hs_createdate', 'notes_last_activity', 'hs_next_activity_date',
+        'unidad_de_negocio_deal', 'prioridad_de_obra__proyecto',
+        'ubicacion_provincia_obra__proyecto', 'madurez_en_adjudicacion_obra__proyecto',
+        'tipo_de_obra__proyecto', 'valor_actual', 'numero_total_de_depositos',
+        'sector_partida', 'peso_total_cmr_toneladas', 'hubspot_owner_id',
+      ];
+      const res = await fetch(
+        `${HUBSPOT_PROXY_URL}/objects/deals/${dealId}?properties=${props.join(',')}&propertiesWithHistory=hs_deal_score,hs_predictive_deal_score,dealstage`
+      );
+      if (!res.ok) throw new Error('Failed to fetch deal from HubSpot');
+      const dealData = await res.json();
+      if (!dealData?.properties || Array.isArray(dealData.properties)) throw new Error('Invalid deal properties');
+
+      const { score, detail } = calculateScore(matrix?.criteria || [], dealData.properties);
+      const threshold = getScoreThreshold(score, matrix?.score_thresholds || []);
+      const enrichedDeal = { ...dealData, score, detail, threshold };
+
+      // 5. Historical Data
+      const healthScoreProp = dealData.properties.hs_deal_score ? 'hs_deal_score' : 'hs_predictive_deal_score';
+      const hsHistory = (dealData.propertiesWithHistory?.[healthScoreProp] || [])
+        .map(h => ({ value: Math.round(parseFloat(h.value)), ts: new Date(h.timestamp) }))
+        .filter(h => !isNaN(h.value))
+        .reverse();
+
+      const currentHealth = dealData.properties[healthScoreProp]
+        ? Math.round(parseFloat(dealData.properties[healthScoreProp]))
+        : null;
+
+      let savedHistory = [];
+      let healthChartData = [];
+      let dmiChartData = [];
+
+      if (currentHealth !== null) {
+        const prevHealthForSave = hsHistory.length >= 2 ? hsHistory[hsHistory.length - 2]?.value : null;
+        const healthDeltaForSave = currentHealth != null && prevHealthForSave != null ? currentHealth - prevHealthForSave : null;
+        const healthTrendForSave = healthDeltaForSave != null ? Math.max(-20, Math.min(20, healthDeltaForSave * 5)) : 0;
+        const dmiForSave = score != null && currentHealth != null
+          ? Math.round((score * 0.35) + (currentHealth * 0.45) + (healthTrendForSave * 0.20))
+          : null;
+
+        let { data: historyData } = await supabase
+          .from('deal_health_scores')
+          .select('score, dmi, recorded_at')
+          .eq('tenant_id', tenantId)
+          .eq('hubspot_deal_id', dealId)
+          .order('recorded_at', { ascending: true });
+
+        const lastSaved = historyData?.length ? historyData[historyData.length - 1] : null;
+        if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
+          await supabase.from('deal_health_scores').insert({
+            tenant_id: tenantId, hubspot_deal_id: dealId,
+            deal_name: dealData.properties.dealname,
+            score: currentHealth, dmi: dmiForSave, source: 'poll',
+          });
+          const { data: updatedHistory } = await supabase
+            .from('deal_health_scores')
+            .select('score, dmi, recorded_at')
+            .eq('tenant_id', tenantId)
+            .eq('hubspot_deal_id', dealId)
+            .order('recorded_at', { ascending: true });
+          savedHistory = updatedHistory || historyData;
+        } else {
+          savedHistory = historyData;
+        }
+
+        const sourceData = (savedHistory && savedHistory.length > 1)
+          ? savedHistory.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
+          : hsHistory;
+
+        healthChartData = sourceData.map((d, i, arr) => ({
+          value: d.value, label: formatChartDate(d.ts, i, arr.length),
+        }));
+
+        if (savedHistory && savedHistory.length > 0) {
+          const dmiData = savedHistory
+            .filter(r => r.dmi != null)
+            .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
+          if (dmiData.length >= 1) {
+            dmiChartData = dmiData.map((d, i, arr) => ({
+              value: d.value, label: formatChartDate(d.ts, i, arr.length),
+            }));
+          }
+        }
+      }
+
+      return {
+        deal: enrichedDeal,
+        healthChartData,
+        dmiChartData,
+        hsHealthHistory: hsHistory,
+        labels: labelMap,
+        hubspotUrl
+      };
+    },
+    enabled: !!tenantId && !!dealId,
+  });
+};
