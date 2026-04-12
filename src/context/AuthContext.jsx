@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
 
+/** One HTTP request even if several SIGNED_IN/INITIAL_SESSION handlers run in the same tick. */
+const tenantFetchInflight = new Map();
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
@@ -20,21 +23,31 @@ export const AuthProvider = ({ children }) => {
   const lastTenantFetchRef = useRef({ userId: null, at: 0 });
 
   const fetchTenant = useCallback(async (authUserId) => {
-    const { data, error } = await supabase
-      .from('tenant_users')
-      .select('tenant_id, rol, tenants(*)')
-      .eq('auth_user_id', authUserId)
-      .maybeSingle();
+    const existing = tenantFetchInflight.get(authUserId);
+    if (existing) return existing;
 
-    if (error) { console.error('Supabase error fetching tenant:', error); setTenant(null); return; }
-    if (!data) { console.warn('No tenant found for user:', authUserId); setTenant(null); return; }
+    const promise = (async () => {
+      const { data, error } = await supabase
+        .from('tenant_users')
+        .select('tenant_id, rol, tenants(*)')
+        .eq('auth_user_id', authUserId)
+        .maybeSingle();
 
-    const nextTenant = data.tenants ?? null;
-    setTenant((prev) => {
-      if (prev?.id != null && nextTenant?.id != null && prev.id === nextTenant.id) return prev;
-      return nextTenant;
+      if (error) { console.error('Supabase error fetching tenant:', error); setTenant(null); return; }
+      if (!data) { console.warn('No tenant found for user:', authUserId); setTenant(null); return; }
+
+      const nextTenant = data.tenants ?? null;
+      setTenant((prev) => {
+        if (prev?.id != null && nextTenant?.id != null && prev.id === nextTenant.id) return prev;
+        return nextTenant;
+      });
+      setUserRole(data.rol ?? null);
+    })().finally(() => {
+      tenantFetchInflight.delete(authUserId);
     });
-    setUserRole(data.rol ?? null);
+
+    tenantFetchInflight.set(authUserId, promise);
+    return promise;
   }, []);
 
   useEffect(() => {
@@ -66,6 +79,7 @@ export const AuthProvider = ({ children }) => {
           fetchTenant(uid).finally(() => setLoading(false));
         }, 0);
       } else {
+        tenantFetchInflight.clear();
         lastTenantFetchRef.current = { userId: null, at: 0 };
         setTenant(null);
         setUserRole(null);

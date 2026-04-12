@@ -225,17 +225,19 @@ const ScoringDetailPage = () => {
           ? Math.round((score * 0.35) + (currentHealth * 0.45) + (healthTrendForSave * 0.20))
           : null;
 
-        // Check last saved value
-        const { data: lastSaved } = await supabase
+        // One read for “último snapshot” + serie del gráfico (antes eran 2 SELECT iguales).
+        let { data: savedHistory } = await supabase
           .from('deal_health_scores')
-          .select('score, dmi')
+          .select('score, dmi, recorded_at')
           .eq('tenant_id', tenant.id)
           .eq('hubspot_deal_id', dealId)
-          .order('recorded_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .order('recorded_at', { ascending: true });
 
         if (stale()) return;
+
+        const lastSaved = savedHistory?.length
+          ? savedHistory[savedHistory.length - 1]
+          : null;
 
         if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
           await supabase.from('deal_health_scores').insert({
@@ -246,17 +248,17 @@ const ScoringDetailPage = () => {
             dmi: dmiForSave,
             source: 'poll',
           });
+          if (stale()) return;
+          const { data: afterInsert } = await supabase
+            .from('deal_health_scores')
+            .select('score, dmi, recorded_at')
+            .eq('tenant_id', tenant.id)
+            .eq('hubspot_deal_id', dealId)
+            .order('recorded_at', { ascending: true });
+          savedHistory = afterInsert ?? savedHistory;
         }
 
         if (stale()) return;
-
-        // Fetch all our saved snapshots for the chart
-        const { data: savedHistory } = await supabase
-          .from('deal_health_scores')
-          .select('score, dmi, recorded_at')
-          .eq('tenant_id', tenant.id)
-          .eq('hubspot_deal_id', dealId)
-          .order('recorded_at', { ascending: true });
 
         // Prefer our saved history (richer), fall back to propertiesWithHistory
         const sourceData = (savedHistory && savedHistory.length > 1)
