@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { calculateScore, getScoreThreshold } from '../lib/scoringEngine';
+import { useQueryClient } from '@tanstack/react-query';
+import { useDealDetails } from '../hooks/useQueries';
 import Spinner from '../components/Spinner';
 
 // ─── SVG Stock Chart ──────────────────────────────────────────────────────────
@@ -93,231 +95,15 @@ const ScoringDetailPage = () => {
   const navigate = useNavigate();
   const { tenant } = useAuth();
 
-  const [deal, setDeal] = useState(null);
-  const [healthChartData, setHealthChartData] = useState([]);
-  const [dmiChartData, setDmiChartData] = useState([]);
-  const [hsHealthHistory, setHsHealthHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [stageLabels, setStageLabels] = useState({});
-  const [hubspotUrl, setHubspotUrl] = useState(null);
+  const queryClient = useQueryClient();
+  const { data: detailsData, isLoading: loading } = useDealDetails(tenant?.id, dealId);
 
-  useEffect(() => {
-    if (!tenant?.id || !dealId) return;
-    let cancelled = false;
-    if (import.meta.env.DEV) {
-      console.log('[deal-detail] effect → fetchDetails', { tenantId: tenant.id, dealId });
-    }
-    fetchDetails({ cancelled: () => cancelled });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenant?.id, dealId]);
-
-  const fetchDetails = async (opts = {}) => {
-    const stale = () => opts.cancelled?.() === true;
-    try {
-      // Matrix
-      const { data: matrix } = await supabase
-        .from('scoring_matrices')
-        .select('*, criteria(*, criterion_options(*)), score_thresholds(*)')
-        .eq('tenant_id', tenant.id).eq('active', true).limit(1).maybeSingle();
-
-      if (stale()) return;
-
-      // Stage labels
-      try {
-        const r = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/pipelines/deals`);
-        const d = await r.json();
-        const map = {};
-        (d.results || []).forEach(p => (p.stages || []).forEach(s => { map[s.id] = s.label; }));
-        setStageLabels(map);
-      } catch (e) { console.warn(e); }
-
-      if (stale()) return;
-
-      // Portal ID
-      let portalId = tenant?.hubspot_portal_id;
-      if (!portalId) {
-        try {
-          const r = await fetch(`${import.meta.env.VITE_PROXY_URL}/proxy/account-info/v3/details`);
-          const d = await r.json();
-          portalId = d.portalId;
-          if (portalId) await supabase.from('tenants').update({ hubspot_portal_id: String(portalId) }).eq('id', tenant.id);
-        } catch (e) { console.warn(e); }
-      }
-      setHubspotUrl(portalId
-        ? `https://app.hubspot.com/contacts/${portalId}/deal/${dealId}`
-        : `https://app.hubspot.com/contacts/deal/${dealId}`
-      );
-
-      if (stale()) return;
-
-      // Deal + propertiesWithHistory for health score
-      // ⚠️ Dual property fetch: hs_deal_score (internal name in HubSpot) + hs_predictive_deal_score (API name)
-      const props = [
-        'dealname', 'amount', 'dealstage',
-        'hs_deal_score',               // Internal name in HubSpot ("Calificación de negocios")
-        'hs_predictive_deal_score',    // Standard HubSpot API field
-        'hs_createdate', 'notes_last_activity', 'hs_next_activity_date',
-        'unidad_de_negocio_deal', 'prioridad_de_obra__proyecto',
-        'ubicacion_provincia_obra__proyecto', 'madurez_en_adjudicacion_obra__proyecto',
-        'tipo_de_obra__proyecto', 'valor_actual', 'numero_total_de_depositos',
-        'sector_partida', 'peso_total_cmr_toneladas', 'hubspot_owner_id',
-      ];
-      const res = await fetch(
-        `${import.meta.env.VITE_PROXY_URL}/proxy/crm/v3/objects/deals/${dealId}` +
-        `?properties=${props.join(',')}&propertiesWithHistory=hs_deal_score,hs_predictive_deal_score,dealstage`
-      );
-      const dealData = await res.json();
-
-      if (stale()) return;
-
-      if (
-        !res.ok
-        || !dealData?.properties
-        || typeof dealData.properties !== 'object'
-        || Array.isArray(dealData.properties)
-      ) {
-        if (import.meta.env.DEV) {
-          console.warn('[deal-detail] deal fetch invalid or error', { status: res.status, dealId, dealData });
-        }
-        if (!stale()) setDeal(null);
-        return;
-      }
-
-      // Calculate potencialidad score
-      const { score, detail } = calculateScore(matrix?.criteria || [], dealData.properties);
-      const threshold = getScoreThreshold(score, matrix?.score_thresholds || []);
-      if (stale()) return;
-      setDeal({ ...dealData, score, detail, threshold });
-
-      // Build chart data: check both property names (hs_deal_score vs hs_predictive_deal_score)
-      // Use whichever one has data (priority: hs_deal_score first, fall back to hs_predictive_deal_score)
-      const healthScoreProp = dealData.properties.hs_deal_score
-        ? 'hs_deal_score'
-        : 'hs_predictive_deal_score';
-      const hsHistory = (dealData.propertiesWithHistory?.[healthScoreProp] || [])
-        .map(h => ({ value: Math.round(parseFloat(h.value)), ts: new Date(h.timestamp) }))
-        .filter(h => !isNaN(h.value))
-        .reverse();  // oldest first
-
-      // Store HubSpot history for accurate delta calculation
-      if (stale()) return;
-      setHsHealthHistory(hsHistory);
-
-      // Save latest health score snapshot to Supabase (if changed)
-      const currentHealth = dealData.properties[healthScoreProp]
-        ? Math.round(parseFloat(dealData.properties[healthScoreProp]))
-        : null;
-
-      if (currentHealth !== null) {
-        // Calculate DMI for saving
-        // Get previous health score from history to calculate trend
-        const prevHealthForSave = hsHistory.length >= 2
-          ? hsHistory[hsHistory.length - 2]?.value
-          : null;
-        const healthDeltaForSave = currentHealth != null && prevHealthForSave != null
-          ? currentHealth - prevHealthForSave
-          : null;
-        const healthTrendForSave = healthDeltaForSave != null ? Math.max(-20, Math.min(20, healthDeltaForSave * 5)) : 0;
-        const dmiForSave = score != null && currentHealth != null
-          ? Math.round((score * 0.35) + (currentHealth * 0.45) + (healthTrendForSave * 0.20))
-          : null;
-
-        // One read for “último snapshot” + serie del gráfico (antes eran 2 SELECT iguales).
-        let { data: savedHistory } = await supabase
-          .from('deal_health_scores')
-          .select('score, dmi, recorded_at')
-          .eq('tenant_id', tenant.id)
-          .eq('hubspot_deal_id', dealId)
-          .order('recorded_at', { ascending: true });
-
-        if (stale()) return;
-
-        const lastSaved = savedHistory?.length
-          ? savedHistory[savedHistory.length - 1]
-          : null;
-
-        if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
-          await supabase.from('deal_health_scores').insert({
-            tenant_id: tenant.id,
-            hubspot_deal_id: dealId,
-            deal_name: dealData.properties.dealname,
-            score: currentHealth,
-            dmi: dmiForSave,
-            source: 'poll',
-          });
-          if (stale()) return;
-          const { data: afterInsert } = await supabase
-            .from('deal_health_scores')
-            .select('score, dmi, recorded_at')
-            .eq('tenant_id', tenant.id)
-            .eq('hubspot_deal_id', dealId)
-            .order('recorded_at', { ascending: true });
-          savedHistory = afterInsert ?? savedHistory;
-        }
-
-        if (stale()) return;
-
-        // Prefer our saved history (richer), fall back to propertiesWithHistory
-        const sourceData = (savedHistory && savedHistory.length > 1)
-          ? savedHistory.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
-          : hsHistory;
-
-        // Format labels (keep all data points, even if same value)
-        const chartData = sourceData.map((d, i, arr) => ({
-          value: d.value,
-          label: formatChartDate(d.ts, i, arr.length),
-        }));
-
-        if (stale()) return;
-        setHealthChartData(chartData);
-
-        // Also load DMI historical data
-        if (savedHistory && savedHistory.length > 0) {
-          const dmiData = savedHistory
-            .filter(r => r.dmi != null)
-            .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
-
-          if (dmiData.length >= 1) {
-            const dmiChartData = dmiData.map((d, i, arr) => ({
-              value: d.value,
-              label: formatChartDate(d.ts, i, arr.length),
-            }));
-            if (stale()) return;
-            setDmiChartData(dmiChartData);
-          }
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      if (!stale()) setLoading(false);
-    }
-  };
-
-  const formatChartDate = (d, i, total) => {
-    if (i === total - 1) return 'HOY';
-    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).toUpperCase();
-  };
-
-  const formatDate = (isoStr) => {
-    if (!isoStr) return null;
-    const d = new Date(isoStr);
-    if (isNaN(d)) return null;
-    const now = new Date();
-    const diff = Math.floor((now - d) / 86400000);
-    if (diff === 0) return 'Hoy';
-    if (diff === 1) return 'Ayer';
-    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
-  const daysSince = (isoStr) => {
-    if (!isoStr) return null;
-    const d = new Date(isoStr);
-    return isNaN(d) ? null : Math.floor((Date.now() - d) / 86400000);
-  };
+  const deal = detailsData?.deal || null;
+  const healthChartData = detailsData?.healthChartData || [];
+  const dmiChartData = detailsData?.dmiChartData || [];
+  const hsHealthHistory = detailsData?.hsHealthHistory || [];
+  const stageLabels = detailsData?.labels || {};
+  const hubspotUrl = detailsData?.hubspotUrl || null;
 
   const getStageLabel = (id) => stageLabels[id] || id;
 
@@ -432,7 +218,7 @@ const ScoringDetailPage = () => {
             <span className="material-symbols-outlined text-[13px]">open_in_new</span>
             HubSpot
           </a>
-          <button onClick={() => fetchDetails({})}
+          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['deal_details', tenant?.id, dealId] })}
             className="flex items-center gap-1.5 px-3 py-2 rounded text-xs font-mono uppercase tracking-widest transition-colors"
             style={{ backgroundColor: '#111', color: '#555', border: '1px solid #222' }}
             onMouseEnter={e => e.currentTarget.style.color = '#fff'}
