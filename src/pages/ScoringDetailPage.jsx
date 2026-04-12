@@ -84,10 +84,26 @@ const Prop = ({ icon, label, value, highlight }) => (
   </div>
 );
 
-// ─── Color helpers (neon palette) ────────────────────────────────────────────
 const sc  = (v) => v >= 70 ? NEON.green  : v >= 45 ? NEON.yellow : NEON.red;
 const sb  = (v) => v >= 70 ? `border-[${NEON.green}30]`  : v >= 45 ? `border-[${NEON.yellow}30]`  : `border-[${NEON.red}30]`;
 const sbg = (v) => v >= 70 ? `bg-[${NEON.green}05]`      : v >= 45 ? `bg-[${NEON.yellow}05]`      : `bg-[${NEON.red}05]`;
+
+const formatDate = (isoStr) => {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (isNaN(d)) return null;
+  const now = new Date();
+  const diff = Math.floor((now - d) / 86400000);
+  if (diff === 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const daysSince = (isoStr) => {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  return isNaN(d) ? null : Math.floor((Date.now() - d) / 86400000);
+};
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const ScoringDetailPage = () => {
