@@ -1,3 +1,4 @@
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useScoringMatrices } from '../hooks/useQueries';
 import { supabase } from '../lib/supabase';
