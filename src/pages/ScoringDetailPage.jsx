@@ -206,13 +206,11 @@ const ScoringDetailPage = () => {
           ? savedHistory.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
           : hsHistory;
 
-        // Deduplicate consecutive equal values & format labels
-        const chartData = sourceData
-          .filter((d, i, arr) => i === 0 || d.value !== arr[i - 1].value)
-          .map((d, i, arr) => ({
-            value: d.value,
-            label: formatChartDate(d.ts, i, arr.length),
-          }));
+        // Format labels (keep all data points, even if same value)
+        const chartData = sourceData.map((d, i, arr) => ({
+          value: d.value,
+          label: formatChartDate(d.ts, i, arr.length),
+        }));
 
         setHealthChartData(chartData);
 
@@ -223,12 +221,10 @@ const ScoringDetailPage = () => {
             .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
 
           if (dmiData.length > 1) {
-            const dmiChartData = dmiData
-              .filter((d, i, arr) => i === 0 || d.value !== arr[i - 1].value)
-              .map((d, i, arr) => ({
-                value: d.value,
-                label: formatChartDate(d.ts, i, arr.length),
-              }));
+            const dmiChartData = dmiData.map((d, i, arr) => ({
+              value: d.value,
+              label: formatChartDate(d.ts, i, arr.length),
+            }));
             setDmiChartData(dmiChartData);
           }
         }
