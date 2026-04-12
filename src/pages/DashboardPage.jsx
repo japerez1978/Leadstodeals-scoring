@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
-import { calculateScore, getScoreThreshold } from '../lib/scoringEngine';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../context/AuthContext';
 import { useDashboardData } from '../hooks/useQueries';
-import Spinner from '../components/Spinner';
 
 // ─── Neon palette ─────────────────────────────────────────────────────────────
 const NEON = {
@@ -53,7 +50,7 @@ const NeonVal = ({ value, color }) => (
 );
 
 // ─── Deal row component ──────────────────────────────────────────────────────
-const DealRow = ({ deal, stageLabel, probability, navigate, rank }) => {
+const DealRow = ({ deal, stageLabel, probability, navigate, rank, ownerMap, companyMap }) => {
   const pot = deal.score;
   const health = deal.healthScore;
   const dmi = deal.dmi;
@@ -90,7 +87,7 @@ const DealRow = ({ deal, stageLabel, probability, navigate, rank }) => {
       {/* Propietario */}
       <td className="px-1.5 py-1.5 hidden xl:table-cell" style={{ flex: 1 }}>
         <span className="text-[10px] text-[#666] truncate block">
-          {deal.properties.hubspot_owner_id || '—'}
+          {ownerMap?.[String(deal.properties.hubspot_owner_id)] || deal.properties.hubspot_owner_id || '—'}
         </span>
       </td>
       {/* Stage + % */}
@@ -203,27 +200,29 @@ const TableHead = () => (
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
-
 const DashboardPage = () => {
   const { tenant } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('live');
   const [clock, setClock] = useState(new Date());
 
-  const queryClient = useQueryClient();
+  // Clock tick for header
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   const { data: dashboardData, isLoading: loading, isFetching: refreshing } = useDashboardData(tenant?.id);
 
   const deals = dashboardData?.deals || [];
   const stageLabels = dashboardData?.labels || {};
   const stageProbabilities = dashboardData?.probs || {};
-  const cacheAge = dashboardData?.timestamp ? Date.now() - dashboardData.timestamp : 0;
-  const loadingStep = loading ? 'Cargando datos de matriz y HubSpot...' : '';
-
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
+  const ownerMap = dashboardData?.ownerMap || {};
+  const companyMap = dashboardData?.companyMap || {};
+  const cacheTimestamp = dashboardData?.timestamp;
+  const cacheAge = cacheTimestamp ? Date.now() - cacheTimestamp : 0;
 
   // ── Categorize deals ─────────────────────────────────────────────────────
   const getProb = (stageId) => {
@@ -308,13 +307,7 @@ const DashboardPage = () => {
           {[...Array(6)].map((_, i) => <div key={i} className="h-3 w-32 bg-[#1a1a1a] rounded" />)}
         </div>
       </div>
-      {/* Step indicator */}
-      {loadingStep && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0d0d0d] border border-[#1e1e1e] rounded w-fit">
-          <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: NEON.green }} />
-          <span className="text-[10px] font-mono" style={{ color: NEON.green }}>{loadingStep}</span>
-        </div>
-      )}
+      {/* Step indicator (Removed) */}
       {/* Table skeleton */}
       <div className="border border-[#1a1a1a] rounded-lg overflow-hidden">
         <div className="bg-[#0d0d0d] px-3 py-2 border-b border-[#1a1a1a]">
@@ -371,9 +364,7 @@ const DashboardPage = () => {
               </span>
             </div>
           )}
-          <button onClick={() => {
-            queryClient.invalidateQueries({ queryKey: ['dashboard_data', tenant?.id] });
-          }}
+          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['dashboard_data', tenant?.id] })}
             className="flex items-center gap-1 px-2 py-1 bg-[#0d0d0d] border border-[#1e1e1e] rounded hover:border-[#00FF87] transition-colors">
             <span className={`material-symbols-outlined text-[14px] text-[#555] ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
           </button>
@@ -552,6 +543,8 @@ const DashboardPage = () => {
                     probability={getProb(deal.properties.dealstage)}
                     navigate={navigate}
                     rank={i + 1}
+                    ownerMap={ownerMap}
+                    companyMap={companyMap}
                   />
                 ))}
               </tbody>

@@ -102,7 +102,7 @@ export const useDashboardData = (tenantId) => {
       let hubspotDeals = [];
       let after = null;
       do {
-        const url = `${baseUrl}?limit=100&properties=${properties.join(',')}${after ? `&after=${after}` : ''}`;
+        const url = `${baseUrl}?limit=100&properties=${properties.join(',')}&associations=companies${after ? `&after=${after}` : ''}`;
         const res = await fetch(url);
         const data = await res.json();
         hubspotDeals = hubspotDeals.concat(data.results || []);
@@ -121,6 +121,45 @@ export const useDashboardData = (tenantId) => {
           probMap[stage.id] = prob != null ? Math.round(parseFloat(prob) * 100) : null;
         });
       });
+
+      // Fetch owners (Handle 403 Forbidden gracefully)
+      const ownerMap = {};
+      try {
+        const ownerRes = await fetch(`${HUBSPOT_PROXY_URL}/owners?limit=100`);
+        if (ownerRes.ok) {
+          const ownerData = await ownerRes.json();
+          (ownerData.results || []).forEach(o => {
+            ownerMap[String(o.id)] = `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email || '—';
+          });
+        }
+      } catch (e) {
+        console.warn('Owners API skipped (likely permission issue)');
+      }
+
+      // Fetch company names via associations with ID validation
+      const companyMap = {};
+      try {
+        const companyIds = [...new Set(
+          hubspotDeals
+            .flatMap(d => (d.associations?.companies?.results || []).map(c => c.id))
+            .filter(id => id && id !== 'null' && id !== 'undefined')
+        )];
+        
+        if (companyIds.length > 0) {
+          const compRes = await fetch(
+            `${HUBSPOT_PROXY_URL}/objects/companies/batch/read`,
+            { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ inputs: companyIds.map(id => ({ id })), properties: ['name'] }) 
+            }
+          );
+          if (compRes.ok) {
+            const compData = await compRes.json();
+            (compData.results || []).forEach(c => { companyMap[c.id] = c.properties?.name || '—'; });
+          }
+        }
+      } catch (e) { console.warn('Company batch skipped:', e.message); }
 
       // Calculate scores
       const dealsWithScores = hubspotDeals.map(deal => {
@@ -141,7 +180,7 @@ export const useDashboardData = (tenantId) => {
       // Fire and forget save
       saveDealScores(dealsWithScores, matrix, tenantId);
 
-      return { deals: dealsWithScores, labels: labelMap, probs: probMap, timestamp: Date.now() };
+      return { deals: dealsWithScores, labels: labelMap, probs: probMap, timestamp: Date.now(), ownerMap, companyMap };
     },
     enabled: !!tenantId,
   });
@@ -220,60 +259,35 @@ export const useDealDetails = (tenantId, dealId) => {
         ? Math.round(parseFloat(dealData.properties[healthScoreProp]))
         : null;
 
-      let savedHistory = [];
+      let historyData = [];
       let healthChartData = [];
       let dmiChartData = [];
-
-      if (currentHealth !== null) {
-        const prevHealthForSave = hsHistory.length >= 2 ? hsHistory[hsHistory.length - 2]?.value : null;
-        const healthDeltaForSave = currentHealth != null && prevHealthForSave != null ? currentHealth - prevHealthForSave : null;
-        const healthTrendForSave = healthDeltaForSave != null ? Math.max(-20, Math.min(20, healthDeltaForSave * 5)) : 0;
-        const dmiForSave = score != null && currentHealth != null
-          ? Math.round((score * 0.35) + (currentHealth * 0.45) + (healthTrendForSave * 0.20))
-          : null;
-
-        let { data: historyData } = await supabase
+      try {
+        const { data } = await supabase
           .from('deal_health_scores')
           .select('score, dmi, recorded_at')
           .eq('tenant_id', tenantId)
           .eq('hubspot_deal_id', dealId)
           .order('recorded_at', { ascending: true });
+        historyData = data || [];
+      } catch (e) { console.warn('Supabase history fetch error:', e); }
 
-        const lastSaved = historyData?.length ? historyData[historyData.length - 1] : null;
-        if (!lastSaved || lastSaved.score !== currentHealth || lastSaved.dmi !== dmiForSave) {
-          await supabase.from('deal_health_scores').insert({
-            tenant_id: tenantId, hubspot_deal_id: dealId,
-            deal_name: dealData.properties.dealname,
-            score: currentHealth, dmi: dmiForSave, source: 'poll',
-          });
-          const { data: updatedHistory } = await supabase
-            .from('deal_health_scores')
-            .select('score, dmi, recorded_at')
-            .eq('tenant_id', tenantId)
-            .eq('hubspot_deal_id', dealId)
-            .order('recorded_at', { ascending: true });
-          savedHistory = updatedHistory || historyData;
-        } else {
-          savedHistory = historyData;
-        }
+      const sourceData = (historyData && historyData.length > 1)
+        ? historyData.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
+        : hsHistory;
 
-        const sourceData = (savedHistory && savedHistory.length > 1)
-          ? savedHistory.map(r => ({ value: r.score, ts: new Date(r.recorded_at) }))
-          : hsHistory;
+      healthChartData = sourceData.map((d, i, arr) => ({
+        value: d.value, label: formatChartDate(d.ts, i, arr.length),
+      }));
 
-        healthChartData = sourceData.map((d, i, arr) => ({
-          value: d.value, label: formatChartDate(d.ts, i, arr.length),
-        }));
-
-        if (savedHistory && savedHistory.length > 0) {
-          const dmiData = savedHistory
-            .filter(r => r.dmi != null)
-            .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
-          if (dmiData.length >= 1) {
-            dmiChartData = dmiData.map((d, i, arr) => ({
-              value: d.value, label: formatChartDate(d.ts, i, arr.length),
-            }));
-          }
+      if (historyData && historyData.length > 0) {
+        const dmiData = historyData
+          .filter(r => r.dmi != null)
+          .map(r => ({ value: r.dmi, ts: new Date(r.recorded_at) }));
+        if (dmiData.length >= 1) {
+          dmiChartData = dmiData.map((d, i, arr) => ({
+            value: d.value, label: formatChartDate(d.ts, i, arr.length),
+          }));
         }
       }
 

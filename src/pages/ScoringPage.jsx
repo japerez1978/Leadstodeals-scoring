@@ -1,8 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
-import { useQueryClient } from '@tanstack/react-query';
 import { useScoringMatrices } from '../hooks/useQueries';
+import { supabase } from '../lib/supabase';
 import Spinner from '../components/Spinner';
 
 const NEON = { green: '#00FF87', red: '#FF3B5C', blue: '#00D4FF', yellow: '#FFD600', orange: '#FF7A00', dim: '#3a3a3a' };
@@ -230,33 +228,27 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
 ───────────────────────────────────────────── */
 const ScoringPage = () => {
   const { tenant } = useAuth();
-  const queryClient = useQueryClient();
-  const { data: matrices = [], isLoading: loading } = useScoringMatrices(tenant?.id);
-  const [selectedMatrixId, setSelectedMatrixId] = useState(null);
+  const { data: matrices = [], isLoading: loading, refetch: fetchMatrices } = useScoringMatrices(tenant?.id);
+  const [selectedMatrix, setSelectedMatrix] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Sync selectedMatrix when matrices load
-  const selectedMatrix = useMemo(() => {
-    if (!matrices.length) return null;
-    if (!selectedMatrixId) return matrices[0];
-    return matrices.find(m => m.id === selectedMatrixId) || matrices[0];
-  }, [matrices, selectedMatrixId]);
-
-  const forceRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['scoring_matrices', tenant?.id] });
-  };
+  useEffect(() => {
+    if (matrices.length > 0 && !selectedMatrix) {
+      setSelectedMatrix(matrices[0]);
+    }
+  }, [matrices, selectedMatrix]);
 
   const updateCriterion = async (criterionId, field, value) => {
     try {
       await supabase.from('criteria').update({ [field]: value }).eq('id', criterionId);
-      forceRefresh();
+      await fetchMatrices();
     } catch (error) { console.error('Error updating criterion:', error); }
   };
 
   const updateOption = async (optionId, field, value) => {
     try {
       await supabase.from('criterion_options').update({ [field]: value }).eq('id', optionId);
-      forceRefresh();
+      await fetchMatrices();
     } catch (error) { console.error('Error updating option:', error); }
   };
 
@@ -264,7 +256,7 @@ const ScoringPage = () => {
     if (!window.confirm(`¿Eliminar el criterio "${criterion.name}"?`)) return;
     try {
       await supabase.from('criteria').delete().eq('id', criterion.id);
-      forceRefresh();
+      await fetchMatrices();
     } catch (error) { console.error('Error deleting criterion:', error); }
   };
 
@@ -297,7 +289,7 @@ const ScoringPage = () => {
             </div>
             <div className="space-y-0.5 p-1">
               {matrices.map(matrix => (
-                <button key={matrix.id} onClick={() => setSelectedMatrixId(matrix.id)}
+                <button key={matrix.id} onClick={() => setSelectedMatrix(matrix)}
                   className={`w-full text-left px-2 py-2 rounded transition-colors text-[11px] ${
                     selectedMatrix?.id === matrix.id
                       ? 'bg-[#00D4FF10] border border-[#00D4FF30] text-white'
@@ -477,7 +469,7 @@ const ScoringPage = () => {
       {showAddModal && selectedMatrix && (
         <AddCriterionModal matrixId={selectedMatrix.id}
           onClose={() => setShowAddModal(false)}
-          onSaved={() => { setShowAddModal(false); forceRefresh(); }} />
+          onSaved={() => { setShowAddModal(false); fetchMatrices(); }} />
       )}
     </div>
   );
