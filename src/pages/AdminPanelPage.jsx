@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import Spinner from '../components/Spinner';
@@ -40,10 +41,8 @@ const inputCls = "w-full px-3 py-2.5 bg-[#131313] border border-[#44474a] rounde
 
 const AdminPanelPage = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('clientes');
-
-  const [tenants, setTenants] = useState([]);
-  const [loadingTenants, setLoadingTenants] = useState(true);
 
   const [showNewTenantForm, setShowNewTenantForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', plan: 'pro' });
@@ -51,43 +50,32 @@ const AdminPanelPage = () => {
   const [selectedTenant, setSelectedTenant] = useState(null);
   const [submittingTenant, setSubmittingTenant] = useState(false);
 
-  const [users, setUsers] = useState([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteData, setInviteData] = useState({ email: '', rol: 'user', tenant_id: '' });
   const [submittingInvite, setSubmittingInvite] = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
 
-  useEffect(() => { fetchTenants(); }, []);
-  useEffect(() => { if (activeTab === 'usuarios') fetchUsers(); }, [activeTab]);
-
-  const fetchTenants = async () => {
-    setLoadingTenants(true);
-    try {
-      const { data } = await supabase.from('tenants').select('*').order('created_at', { ascending: false });
-      setTenants(data || []);
-    } catch (error) {
-      console.error('Error fetching tenants:', error);
-    } finally {
-      setLoadingTenants(false);
+  const { data: tenants = [], isLoading: loadingTenants } = useQuery({
+    queryKey: ['admin_tenants'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('tenants').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
     }
-  };
+  });
 
-  const fetchUsers = async () => {
-    setLoadingUsers(true);
-    try {
+  const { data: users = [], isLoading: loadingUsers } = useQuery({
+    queryKey: ['admin_users'],
+    queryFn: async () => {
       const { data, error } = await supabase
         .from('tenant_users')
         .select('id, email, rol, tenant_id, auth_user_id, created_at, tenants(nombre)')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      setUsers(data || []);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
+      return data || [];
+    },
+    enabled: activeTab === 'usuarios'
+  });
 
   const handleCreateTenant = async (e) => {
     e.preventDefault();
@@ -110,7 +98,7 @@ const AdminPanelPage = () => {
       setFormData({ name: '', email: '', plan: 'pro' });
       setApiToken('');
       setShowNewTenantForm(false);
-      await fetchTenants();
+      queryClient.invalidateQueries({ queryKey: ['admin_tenants'] });
     } catch (error) {
       console.error('Error creating tenant:', error);
       alert('Error al crear tenant: ' + error.message);
@@ -122,7 +110,7 @@ const AdminPanelPage = () => {
   const handleUpdateToken = async (tenantId, newToken) => {
     try {
       await supabase.from('tenants').update({ hubspot_access_token: newToken }).eq('id', tenantId);
-      await fetchTenants();
+      queryClient.invalidateQueries({ queryKey: ['admin_tenants'] });
       setSelectedTenant(null);
     } catch (error) {
       console.error('Error updating token:', error);
@@ -134,7 +122,7 @@ const AdminPanelPage = () => {
     if (!window.confirm('¿Estás seguro? Esta acción no se puede deshacer.')) return;
     try {
       await supabase.from('tenants').delete().eq('id', tenantId);
-      await fetchTenants();
+      queryClient.invalidateQueries({ queryKey: ['admin_tenants'] });
     } catch (error) {
       console.error('Error deleting tenant:', error);
       alert('Error al eliminar tenant');
@@ -157,7 +145,7 @@ const AdminPanelPage = () => {
       setInviteMsg({ type: 'success', text: `Usuario ${inviteData.email} invitado. Se vinculará al iniciar sesión.` });
       setInviteData({ email: '', rol: 'user', tenant_id: '' });
       setShowInviteForm(false);
-      await fetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['admin_users'] });
     } catch (error) {
       console.error('Error inviting user:', error);
       setInviteMsg({ type: 'error', text: 'Error al invitar usuario: ' + error.message });
@@ -171,7 +159,7 @@ const AdminPanelPage = () => {
     try {
       const { error } = await supabase.from('tenant_users').delete().eq('id', userId);
       if (error) throw error;
-      await fetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['admin_users'] });
     } catch (error) {
       console.error('Error deleting user:', error);
       alert('Error al eliminar usuario: ' + error.message);
