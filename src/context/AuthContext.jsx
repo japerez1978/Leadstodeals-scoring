@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
@@ -35,11 +35,18 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
+      // New User object on every TOKEN_REFRESHED → full tree re-render → duplicate work / noisy Network.
+      setUser((prev) => {
+        const next = session?.user ?? null;
+        if (!next) return null;
+        if (prev?.id === next.id) return prev;
+        return next;
+      });
+
       if (session?.user) {
-        // TOKEN_REFRESHED fires often; re-fetching tenant replaces `tenant` with a new object
-        // reference and re-triggers every useEffect([tenant]) in the app → HubSpot/Supabase loops.
-        if (event === 'TOKEN_REFRESHED') {
+        // Only these events mean “session identity changed”; everything else updates the JWT in-memory.
+        const needTenant = event === 'INITIAL_SESSION' || event === 'SIGNED_IN';
+        if (!needTenant) {
           setLoading(false);
           return;
         }
@@ -55,18 +62,23 @@ export const AuthProvider = ({ children }) => {
     return () => subscription.unsubscribe();
   }, [fetchTenant]);
 
-  const signIn = async (email, password) => {
+  const signIn = useCallback(async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, tenant, userRole, loading, signIn, signOut }),
+    [user, tenant, userRole, loading, signIn, signOut]
+  );
 
   return (
-    <AuthContext.Provider value={{ user, tenant, userRole, loading, signIn, signOut }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
