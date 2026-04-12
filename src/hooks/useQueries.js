@@ -94,14 +94,19 @@ export const useDashboardData = (tenantId) => {
         });
       });
 
-      // Owners API disabled to avoid 403 Forbidden console noise until token has permissions
+      // Fetch owners (Handle 403 Forbidden gracefully)
       const ownerMap = {};
-      /*
       try {
         const ownerRes = await fetch(`${HUBSPOT_PROXY_URL}/owners?limit=100`);
-        if (ownerRes.ok) { ... }
-      } catch (e) { ... }
-      */
+        if (ownerRes.ok) {
+          const ownerData = await ownerRes.json();
+          (ownerData.results || []).forEach(o => {
+            ownerMap[String(o.id)] = `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email || '—';
+          });
+        }
+      } catch (e) {
+        console.warn('Owners API skipped (likely permission issue)');
+      }
 
       // Fetch company names via associations with ID validation and chunking (HubSpot limit is 100)
       const companyMap = {};
