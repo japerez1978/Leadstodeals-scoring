@@ -16,8 +16,17 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // Alias opcional por si acaso, aunque ya usamos file:
-      'core-saas': path.resolve(__dirname, '../core-saas')
+      'core-saas': path.resolve(__dirname, '../core-saas'),
+      // Forzamos a que las dependencias de la carpeta externa se busquen aquí
+      '@supabase/supabase-js': path.resolve(__dirname, 'node_modules/@supabase/supabase-js'),
+      '@tanstack/react-query': path.resolve(__dirname, 'node_modules/@tanstack/react-query')
+    }
+  },
+  build: {
+    rollupOptions: {
+      // Forzamos a que las dependencias de core-saas se resuelvan
+      // desde el node_modules de esta aplicación durante el build.
+      external: []
     }
   }
 })
