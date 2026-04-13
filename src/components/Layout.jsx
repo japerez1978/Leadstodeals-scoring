@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useTenant, useUserAccess } from 'core-saas'; // Hooks del Core
+import Spinner from './Spinner';
 
 const NavItem = ({ to, icon, label, active }) => (
   <Link
@@ -17,10 +19,17 @@ const NavItem = ({ to, icon, label, active }) => (
 );
 
 const Layout = ({ children }) => {
-  const { user, tenant, userRole, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Cargamos los datos del sistema SaaS
+  const { data: tenantData, isLoading: tenantLoading } = useTenant(user?.id, user?.email);
+  const { data: userAccess = [], isLoading: accessLoading } = useUserAccess(tenantData?.tenant_id);
+
+  const tenant = tenantData?.tenants;
+  const userRole = tenantData?.rol;
 
   const handleSignOut = async () => {
     await signOut();
@@ -29,12 +38,17 @@ const Layout = ({ children }) => {
 
   const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + '/');
 
+  // Helper para verificar permisos de apps (usando el nuevo sistema de slugs)
+  const hasApp = (slug) => userAccess.includes(slug) || userRole === 'superadmin';
+
+  if (tenantLoading && !tenantData) return <Spinner />;
+
   return (
     <div className="min-h-screen bg-[#131313] text-[#e5e2e1] flex">
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-40 w-60 bg-[#1c1b1c] border-r border-[#44474a] flex flex-col transition-transform duration-300 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } lg:translate-x-0 lg:static lg:flex`}>
+      } lg:translate-x-0 lg:sticky lg:h-screen lg:top-0`}>
         {/* Logo */}
         <div className="p-4 border-b border-[#44474a]">
           <div className="flex items-center gap-2">
@@ -51,9 +65,16 @@ const Layout = ({ children }) => {
         {/* Nav links */}
         <nav className="flex-1 p-3 space-y-1">
           <NavItem to="/dashboard" icon="dashboard" label="Dashboard" active={isActive('/dashboard')} />
-          <NavItem to="/scoring" icon="tune" label="Scoring Config" active={isActive('/scoring')} />
+          {hasApp('scoring') && (
+            <NavItem to="/scoring" icon="tune" label="Scoring Config" active={isActive('/scoring')} />
+          )}
+          
+          <div className="pt-4 pb-2 px-3">
+            <div className="h-px bg-white/5 w-full" />
+          </div>
+
           {['admin', 'superadmin'].includes(userRole) && (
-            <NavItem to="/admin" icon="admin_panel_settings" label="Admin" active={isActive('/admin')} />
+            <NavItem to="/admin" icon="admin_panel_settings" label="Panel Admin" active={isActive('/admin')} />
           )}
         </nav>
 

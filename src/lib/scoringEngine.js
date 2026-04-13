@@ -20,26 +20,40 @@ export function calculateScore(criteria, dealProperties) {
   const detail = [];
 
   for (const criterion of criteria) {
-    const type = criterion.type || 'enum';
-    const config = criterion.config || {};
+    // [HEALTH-CHECK] Auto-detect type if missing based on options presence
+    const hasOptions = (criterion.criterion_options?.length > 0 || criterion.criterion_option?.length > 0);
+    const type = criterion.type || (hasOptions ? 'enum' : 'text');
+    
+    // [HEALTH-CHECK] Ensure config is never truly empty for level-based items
+    const config = { 
+      default_multiplier: 0,
+      ...(criterion.config || {})
+    };
+    
     const rawValue = props[criterion.hubspot_property] ?? null;
     const weight = parseFloat(criterion.weight) || 0;
     totalWeights += weight;
 
     let multiplier = config.default_multiplier ?? 0;
-    let matchedLabel = 'Sin dato';
+    let matchedLabel = rawValue ? `${rawValue} (No mapeado)` : 'Sin dato';
 
     if (type === 'enum') {
-      const opt = (criterion.criterion_options || []).find(o =>
-        String(o.hubspot_value).toLowerCase() === String(rawValue ?? '').toLowerCase()
-      );
+      const opt = (criterion.criterion_options || []).find(o => {
+        // Aggressive normalization
+        const clean = (val) => String(val || '').toLowerCase().trim().replace(/\s+/g, '');
+        const rVal = clean(rawValue);
+        
+        // Match against BOTH value and label
+        const hVal = clean(o.hubspot_value);
+        const lVal = clean(o.label);
+        
+        return hVal === rVal || lVal === rVal || 
+               (rVal.length > 2 && (hVal.includes(rVal) || lVal.includes(rVal)));
+      });
       if (opt) {
-        multiplier = parseFloat(opt.multiplier);
-        matchedLabel = opt.label || opt.hubspot_value;
-      } else if (rawValue !== null) {
-        matchedLabel = `${rawValue} (no mapeado)`;
+        multiplier = parseFloat(opt.multiplier || 0);
+        matchedLabel = opt.label || opt.hubspot_value || String(rawValue);
       }
-
     } else if (type === 'range') {
       const num = parseFloat(rawValue);
       if (!isNaN(num)) {
@@ -55,16 +69,44 @@ export function calculateScore(criteria, dealProperties) {
       }
 
     } else if (type === 'province_map' || type === 'sector_map') {
-      // Busca en criterion_options; si no está, usa default_multiplier
-      const opt = (criterion.criterion_options || []).find(o =>
-        String(o.hubspot_value).toLowerCase() === String(rawValue ?? '').toLowerCase()
-      );
+      const opt = (criterion.criterion_options || []).find(o => {
+        const hVal = String(o.hubspot_value || '').trim().toLowerCase();
+        const rVal = String(rawValue || '').trim().toLowerCase();
+        return hVal === rVal;
+      });
       if (opt) {
         multiplier = parseFloat(opt.multiplier);
         matchedLabel = opt.label || opt.hubspot_value;
       } else if (rawValue !== null) {
         matchedLabel = `${rawValue} (Muy baja)`;
-        multiplier = config.default_multiplier ?? -1.0;
+        multiplier = config.default_multiplier || -1.0;
+      }
+    }
+
+    // --- GLOBAL INFERENCE ENGINE (Shadow Logic) ---
+    // Si no hay match (multiplicador 0 o No mapeado) y el nombre sugiere niveles, deducimos el score del texto
+    if (multiplier === 0 || matchedLabel.includes('No mapeado')) {
+      const cleanVal = (v) => String(v || '').toLowerCase().trim();
+      const rVal = cleanVal(rawValue);
+      const name = (criterion.name || '').toLowerCase();
+      
+      if (name.includes('nivel') || name.includes('tier') || name.includes('prioridad')) {
+        console.log(`[ARCHITECT-AUDIT] Running inference for: "${criterion.name}" -> Value: "${rawValue}"`);
+        
+        if (rVal.includes('1') || rVal.includes('alto') || rVal.includes('alta')) {
+          multiplier = 1.0;
+          matchedLabel = `${rawValue} (Inferido: Muy Alto)`;
+        } else if (rVal.includes('2') || rVal.includes('medio')) {
+          multiplier = 0.5;
+          matchedLabel = `${rawValue} (Inferido: Medio)`;
+        } else if (rVal.includes('3') || rVal.includes('bajo') || rVal.includes('baja')) {
+          multiplier = -1.0;
+          matchedLabel = `${rawValue} (Inferido: Muy Bajo)`;
+        }
+        
+        if (matchedLabel.includes('Inferido')) {
+          console.log(`[ARCHITECT-AUDIT] INFERENCE APPLIED: ${multiplier} for "${criterion.name}"`);
+        }
       }
     }
 
@@ -72,6 +114,7 @@ export function calculateScore(criteria, dealProperties) {
 
     detail.push({
       criterion: criterion.name,
+      code: criterion.code,
       type,
       weight,
       multiplier,

@@ -115,3 +115,23 @@ forwards the call. Tokens never reach the browser.
 - Score formula: `((Σ(weight × multiplier) + totalWeights) / (totalWeights × 2)) × 100`, bounded 0–100.
 - Historical scores are **INSERTED** (not upserted) into `deal_scores` so we
   keep a timeline.
+
+---
+
+## SCORING INTEGRITY & RESILIENCE — CRITICAL
+
+### 6. HubSpot Property Inconsistency (Double Underscores)
+HubSpot often sends properties with double underscores (e.g., `nivel__de__cliente`) while matrix config might use single ones. 
+**Rule:** Always use **Fuzzy Normalization** in the engine. Normalize keys by lowering, trimming, and removing all internal spaces/special characters before matching.
+
+### 7. Supabase Relationship Mismatch (Singular vs Plural)
+The table is named `criterion_option` (singular), but Supabase sometimes returns it as `criterion_options` (plural) depending on relationship aliasing. 
+**Rule:** In `useQueries.js`, always load options using the fallback: `(c.criterion_options || c.criterion_option || [])`.
+
+### 8. JSONB Config Resilience
+The `config` column in `criteria` often comes as empty `{}`.
+**Rule:** Never assume `config` has contents. The engine MUST provide defaults: `const config = { default_multiplier: 0, ...(criterion.config || {}) };`.
+
+### 9. Scoring Inference Engine (Shadow Logic)
+To avoid "0.0" scores when DB sync is incomplete, the engine implements textual inference for level-based criteria (Tier 1, Tier 2, Tier 3, Muy Alto, etc.).
+**Rule:** If mapping fails but the criterion name suggests a "Level" or "Tier", deduce the multiplier from the text value as a high-reliability fallback.
