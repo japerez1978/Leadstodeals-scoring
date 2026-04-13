@@ -72,28 +72,28 @@ const DealRow = ({ deal, stageLabel, probability, navigate, rank, ownerMap, comp
     >
       {/* Rank */}
       <td className="pl-2 pr-1 py-1.5 text-center flex-shrink-0" style={{ width: '24px' }}>
-        <span className="font-mono text-[9px] text-[#3a3a3a]">{rank}</span>
+        <span className="font-mono text-[9px] text-[#555]">{rank}</span>
       </td>
       {/* Deal name */}
       <td className="px-1.5 py-1.5" style={{ flex: 2 }}>
-        <p className="text-white text-[11px] font-medium leading-tight group-hover:text-[#00FF87] transition-colors whitespace-normal break-words">
+        <p className="text-white text-[11px] font-bold leading-tight group-hover:text-[#00FF87] transition-colors whitespace-normal break-words">
           {deal.properties.dealname}
         </p>
       </td>
       {/* Unidad de negocio */}
       <td className="px-1.5 py-1.5 hidden xl:table-cell" style={{ flex: 1 }}>
-        <span className="text-[10px] text-[#666] truncate block">{deal.properties.unidad_de_negocio_deal || '—'}</span>
+        <span className="text-[10px] text-[#bbb] font-medium truncate block">{deal.properties.unidad_de_negocio_deal || '—'}</span>
       </td>
       {/* Propietario */}
       <td className="px-1.5 py-1.5 hidden xl:table-cell" style={{ flex: 1 }}>
-        <span className="text-[10px] text-[#666] truncate block">
+        <span className="text-[10px] text-[#bbb] font-medium truncate block">
           {ownerMap?.[String(deal.properties.hubspot_owner_id)] || deal.properties.hubspot_owner_id || '—'}
         </span>
       </td>
       {/* Stage + % */}
       <td className="px-1.5 py-1.5 hidden lg:table-cell" style={{ flex: 0.8 }}>
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[#666] truncate">{stageLabel}</span>
+          <span className="text-[10px] text-[#bbb] truncate">{stageLabel}</span>
           <span className="font-mono text-[9px] px-1 rounded text-nowrap"
             style={{
               color: probability === 100 ? NEON.green : probability === 0 ? NEON.red : NEON.blue,
@@ -105,7 +105,7 @@ const DealRow = ({ deal, stageLabel, probability, navigate, rank, ownerMap, comp
       </td>
       {/* Amount */}
       <td className="px-1.5 py-1.5 text-right hidden sm:table-cell flex-shrink-0" style={{ flex: 0.8 }}>
-        <span className="font-mono text-[11px] text-white text-nowrap">
+        <span className="font-mono text-[11px] text-[#efefef] font-bold text-nowrap">
           {amount ? `€${amount.toLocaleString('es-ES', { minimumFractionDigits: 0 })}` : '—'}
         </span>
       </td>
@@ -158,36 +158,48 @@ const SectionHeader = ({ icon, title, count, color, totalAmount }) => (
   </div>
 );
 
-// ─── Table header ────────────────────────────────────────────────────────────
+// ─── Tooltip Helper ──────────────────────────────────────────────────────────
+const Tooltip = ({ text }) => (
+  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-[#0d0d0d] border border-[#333] rounded shadow-2xl z-[200] pointer-events-none">
+    <p className="text-[10px] leading-relaxed text-[#8a8a8a] font-normal lowercase tracking-normal">
+      {text}
+    </p>
+    <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-[#333]" />
+  </div>
+);
+
 const TableHead = () => (
   <thead style={{ display: 'block' }}>
     <tr className="border-b border-[#1e1e1e]" style={{ display: 'flex', width: '100%' }}>
       <th className="pl-2 pr-1 py-1.5 text-[9px] text-[#3a3a3a] font-mono font-bold uppercase tracking-widest flex-shrink-0" style={{ width: '24px' }}>
         #
       </th>
-      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#555]" style={{ flex: 2 }}>
+      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#aaa]" style={{ flex: 2 }}>
         Deal
       </th>
-      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#555] hidden xl:block" style={{ flex: 1 }}>
+      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#aaa] hidden xl:block" style={{ flex: 1 }}>
         U.Negocio
       </th>
-      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#555] hidden xl:block" style={{ flex: 1 }}>
+      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#aaa] hidden xl:block" style={{ flex: 1 }}>
         Propietario
       </th>
-      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#555] hidden lg:block" style={{ flex: 0.8 }}>
+      <th className="px-1.5 py-1.5 text-left text-[9px] font-bold uppercase tracking-widest text-[#aaa] hidden lg:block" style={{ flex: 0.8 }}>
         Etapa
       </th>
-      <th className="px-1.5 py-1.5 text-right text-[9px] font-bold uppercase tracking-widest text-[#555] hidden sm:block" style={{ flex: 0.8 }}>
+      <th className="px-1.5 py-1.5 text-right text-[9px] font-bold uppercase tracking-widest text-[#aaa] hidden sm:block" style={{ flex: 0.8 }}>
         Importe
       </th>
-      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest flex-shrink-0" style={{ color: NEON.green, width: '50px' }}>
+      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest flex-shrink-0 relative group cursor-pointer" style={{ color: NEON.green, width: '50px' }}>
         CAL
+        <Tooltip text="Calidad: Mide el encaje del negocio según tus criterios de scoring. Es el potencial teórico del deal." />
       </th>
-      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest hidden md:block flex-shrink-0" style={{ color: NEON.blue, width: '50px' }}>
+      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest hidden md:block flex-shrink-0 relative group cursor-pointer" style={{ color: NEON.blue, width: '50px' }}>
         SAL
+        <Tooltip text="Salud: Evalúa el nivel de compromiso y actividad real (reuniones, correos). Mide si la relación está 'viva'." />
       </th>
-      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest flex-shrink-0" style={{ color: NEON.orange, width: '50px' }}>
+      <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest flex-shrink-0 relative group cursor-pointer" style={{ color: NEON.orange, width: '50px' }}>
         DMI
+        <Tooltip text="Momentum: Prioridad máxima. Combina Calidad y Salud para indicarte dónde hay más probabilidad de éxito hoy." />
       </th>
       <th className="px-1.5 py-1.5 text-center text-[9px] font-bold uppercase tracking-widest hidden sm:block flex-shrink-0" style={{ color: '#555', width: '70px' }}>
         ACCIÓN
@@ -548,20 +560,23 @@ const DashboardPage = () => {
           MEDIAS {tc.label}
         </span>
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative group cursor-pointer">
             <span className="text-[9px] uppercase font-bold" style={{ color: NEON.green }}>CAL</span>
             <span className="font-mono text-sm font-black" style={{ color: NEON.green, textShadow: `0 0 10px ${NEON.green}40` }}>{averages.cal}</span>
             <MiniBar value={averages.cal} color={NEON.green} />
+            <Tooltip text="CALIDAD: Puntuación de encaje comercial según la matriz de scoring." />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative group cursor-pointer">
             <span className="text-[9px] uppercase font-bold" style={{ color: NEON.blue }}>SAL</span>
             <span className="font-mono text-sm font-black" style={{ color: NEON.blue, textShadow: `0 0 10px ${NEON.blue}40` }}>{averages.sal}</span>
             <MiniBar value={averages.sal} color={NEON.blue} />
+            <Tooltip text="SALUD: Nivel de actividad y engagement detectado en HubSpot." />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative group cursor-pointer">
             <span className="text-[9px] uppercase font-bold" style={{ color: NEON.orange }}>DMI</span>
             <span className="font-mono text-sm font-black" style={{ color: NEON.orange, textShadow: `0 0 10px ${NEON.orange}40` }}>{averages.dmi}</span>
             <MiniBar value={averages.dmi} color={NEON.orange} />
+            <Tooltip text="MOMENTUM: Índice de prioridad combinada (Calidad x Salud)." />
           </div>
         </div>
       </div>
