@@ -206,6 +206,25 @@ const ScoringDetailPage = () => {
   const hColor   = healthScore != null ? sc(healthScore) : NEON.dim;
   const dmiColor = dmiStatus.color;
 
+  const getEmoji = (val, type) => {
+    if (val == null) return '❓';
+    if (type === 'sal') {
+      if (val >= 70) return '😃';
+      if (val >= 45) return '😢';
+      return '😭';
+    }
+    if (type === 'dmi') {
+      if (val >= 75) return '🚀';
+      if (val >= 50) return '😐';
+      if (val >= 25) return '😰';
+      return '💀';
+    }
+    // Default / Potentiality
+    if (val >= 75) return '✨';
+    if (val >= 50) return '👍';
+    return '⚠️';
+  };
+
   return (
     <div className="space-y-5" style={{ fontFamily: 'monospace' }}>
 
@@ -249,136 +268,122 @@ const ScoringDetailPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
 
         {/* CAL — Deal Potentiality Score */}
-        <div className="rounded-lg p-4 flex flex-col" style={{ background: '#0d0d0d', border: `1px solid ${potColor}25` }}>
-          <div className="flex items-start gap-3 flex-1">
-            <div className="shrink-0 text-center">
-              <div className="mb-2">
-                <span className="font-mono text-[8px] uppercase tracking-widest block" style={{ color: potColor }}>CAL</span>
-                <span className="font-mono text-[7px] lowercase tracking-wide block mt-0.5" style={{ color: '#666' }}>potentiality</span>
-              </div>
-              <span className="font-black" style={{ 
-                fontSize: '3.5rem', color: potColor, lineHeight: 1, 
-                textShadow: `0 0 30px ${potColor}60`,
-                background: `${potColor}15`,
-                padding: '0.5rem 0.75rem',
-                borderRadius: '0.5rem',
-                display: 'inline-block'
-              }}>
-                {potScore}
-              </span>
-              {deal.threshold?.label && (
-                <div className="mt-2">
-                  <span className="font-mono text-[7px] uppercase tracking-widest px-1 py-0.5 rounded inline-block"
-                    style={{ color: potColor, background: potColor + '15', border: `1px solid ${potColor}30` }}>
-                    {deal.threshold.label}
-                  </span>
+        <div className="flex flex-col">
+          <h2 className="text-center text-[10px] font-bold uppercase tracking-[0.3em] mb-3 text-[#555]">CALIDAD DEL NEGOCIO</h2>
+          <div className="rounded-lg p-5 flex flex-col justify-center relative overflow-hidden h-full min-h-[160px]" style={{ background: '#0d0d0d', border: `1px solid ${potColor}25` }}>
+            <div className="flex items-center gap-6">
+              <div className="shrink-0 text-center">
+                <div className="mb-2">
+                  <span className="font-mono text-[8px] uppercase tracking-widest block" style={{ color: potColor }}>CAL</span>
                 </div>
-              )}
-            </div>
-            <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-              {p.valor_actual && (
-                <Prop icon="payments" label="Valor" value={`€${parseFloat(p.valor_actual).toLocaleString()}`} />
-              )}
-              {p.sector_partida && (
-                <Prop icon="category" label="Sector" value={p.sector_partida} />
-              )}
-              {p.ubicacion_provincia_obra__proyecto && (
-                <Prop icon="location_on" label="Provincia" value={p.ubicacion_provincia_obra__proyecto} />
-              )}
-              {p.tipo_de_obra__proyecto && (
-                <Prop icon="construction" label="Tipo" value={p.tipo_de_obra__proyecto} />
-              )}
-              {p.madurez_en_adjudicacion_obra__proyecto && (
-                <Prop icon="task_alt" label="Estado" value={p.madurez_en_adjudicacion_obra__proyecto} />
-              )}
+                <span className="font-black" style={{ 
+                  fontSize: '3.5rem', color: potColor, lineHeight: 1, 
+                  textShadow: `0 0 30px ${potColor}60`,
+                  background: `${potColor}15`,
+                  padding: '0.4rem 0.6rem',
+                  borderRadius: '0.5rem',
+                  display: 'inline-block'
+                }}>
+                  {potScore}
+                </span>
+              </div>
+              <div className="flex-1 flex flex-col gap-2 min-w-0 border-l border-white/5 pl-4">
+                {p.valor_actual && (
+                  <Prop icon="payments" label="Valor" value={`€${parseFloat(p.valor_actual).toLocaleString()}`} />
+                )}
+                {p.sector_partida && (
+                  <Prop icon="category" label="Sector" value={p.sector_partida} />
+                )}
+                {p.ubicacion_provincia_obra__proyecto && (
+                  <Prop icon="location_on" label="Provincia" value={p.ubicacion_provincia_obra__proyecto} />
+                )}
+              </div>
+              <div className="shrink-0 flex items-center justify-center pr-6">
+                <span className="text-6xl drop-shadow-[0_0_15px_rgba(0,0,0,0.5)]">{getEmoji(potScore, 'cal')}</span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* SAL — Deal Health Score */}
-        <div className="rounded-lg p-4 flex flex-col" style={{ background: '#0d0d0d', border: `1px solid ${hColor}25` }}>
-          <div className="flex items-start gap-3 flex-1">
-            <div className="shrink-0 text-center">
-              <div className="mb-2">
-                <span className="font-mono text-[8px] uppercase tracking-widest block" style={{ color: hColor }}>SAL</span>
-                <span className="font-mono text-[7px] lowercase tracking-wide block mt-0.5" style={{ color: '#666' }}>health score</span>
-              </div>
-              {healthScore != null ? (
-                <>
-                  <span className="font-black" style={{ 
-                    fontSize: '3.5rem', color: hColor, lineHeight: 1, 
-                    textShadow: `0 0 30px ${hColor}60`,
-                    background: `${hColor}15`,
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: '0.5rem',
-                    display: 'inline-block'
-                  }}>
-                    {healthScore}
-                  </span>
-                  <div className="mt-2">
-                    <span className="font-mono text-[7px] uppercase tracking-widest px-1 py-0.5 rounded inline-block"
-                      style={{ color: hColor, background: hColor + '15', border: `1px solid ${hColor}30` }}>
-                      {healthScore < 50 ? 'BAJO' : healthScore < 75 ? 'MEDIO' : 'ALTO'}
+        <div className="flex flex-col">
+          <h2 className="text-center text-[10px] font-bold uppercase tracking-[0.3em] mb-3 text-[#555]">SALUD DEL NEGOCIO</h2>
+          <div className="rounded-lg p-5 flex flex-col justify-center relative overflow-hidden h-full min-h-[160px]" style={{ background: '#0d0d0d', border: `1px solid ${hColor}25` }}>
+            <div className="flex items-center gap-6">
+              <div className="shrink-0 text-center">
+                <div className="mb-2">
+                  <span className="font-mono text-[8px] uppercase tracking-widest block" style={{ color: hColor }}>SAL</span>
+                </div>
+                {healthScore != null ? (
+                  <>
+                    <span className="font-black" style={{ 
+                      fontSize: '3.5rem', color: hColor, lineHeight: 1, 
+                      textShadow: `0 0 30px ${hColor}60`,
+                      background: `${hColor}15`,
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: '0.5rem',
+                      display: 'inline-block'
+                    }}>
+                      {healthScore}
                     </span>
-                  </div>
-                  {healthDelta !== null && (
-                    <div className="mt-1">
-                      <span className="font-mono text-[9px] font-bold"
-                        style={{ color: healthDelta >= 0 ? NEON.green : NEON.red }}>
-                        {healthDelta >= 0 ? '↑' : '↓'} {Math.abs(healthDelta)}
-                      </span>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <span className="font-mono text-[10px]" style={{ color: '#555' }}>N/A</span>
-              )}
-            </div>
-            <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-              {stageLabel && <Prop icon="swap_horiz" label="Etapa" value={stageLabel} />}
-              {daysCreated != null && <Prop icon="calendar_today" label="Creación" value={`${daysCreated}d`} />}
-              {daysInStage != null && <Prop icon="schedule" label="En etapa" value={`${daysInStage}d`} />}
-              <Prop icon="event_available" label="Últ. actividad" value={formatDate(p.notes_last_activity) || '—'} />
-              <Prop icon="event_upcoming" label="Próx. actividad" value={formatDate(p.hs_next_activity_date)} highlight />
+                    {healthDelta !== null && (
+                      <div className="mt-1">
+                        <span className="font-mono text-[10px] font-bold"
+                          style={{ color: healthDelta >= 0 ? NEON.green : NEON.red }}>
+                          {healthDelta >= 0 ? '↑' : '↓'} {Math.abs(healthDelta)}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span className="font-mono text-[10px]" style={{ color: '#555' }}>N/A</span>
+                )}
+              </div>
+              <div className="flex-1 flex flex-col gap-2 min-w-0 border-l border-white/5 pl-4">
+                {stageLabel && <Prop icon="swap_horiz" label="Etapa" value={stageLabel} />}
+                {daysInStage != null && <Prop icon="schedule" label="En etapa" value={`${daysInStage}d`} />}
+                <Prop icon="event_upcoming" label="Próx. actividad" value={formatDate(p.hs_next_activity_date)} highlight />
+              </div>
+              <div className="shrink-0 flex items-center justify-center pr-6">
+                <span className="text-6xl drop-shadow-[0_0_15px_rgba(0,0,0,0.5)]">{getEmoji(healthScore, 'sal')}</span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* DMI — Deal Momentum Index */}
-        <div className="rounded-lg p-4 flex flex-col" style={{
-          background: '#0d0d0d',
-          border: `2px solid ${dmiColor}50`,
-          boxShadow: `0 0 30px ${dmiColor}15, inset 0 1px 0 ${dmiColor}10`
-        }}>
-          <div className="flex items-start gap-3 flex-1">
-            <div className="shrink-0 text-center">
-              <div className="mb-2">
-                <span className="font-mono text-[8px] uppercase tracking-widest font-black block" style={{ color: dmiColor }}>DMI</span>
-                <span className="font-mono text-[7px] lowercase tracking-wide block mt-0.5" style={{ color: '#666' }}>momentum</span>
-              </div>
-              <span className="font-black" style={{
-                fontSize: '4.5rem', color: dmiColor, lineHeight: 1,
-                textShadow: `0 0 60px ${dmiColor}, 0 0 100px ${dmiColor}80, 0 0 150px ${dmiColor}40`,
-                background: `${dmiColor}20`,
-                padding: '0.75rem 1rem',
-                borderRadius: '0.5rem',
-                display: 'inline-block',
-                letterSpacing: '0.1em'
-              }}>
-                {dmi ?? '—'}
-              </span>
-              <div className="mt-2">
-                <span className="font-mono text-[7px] px-1 py-0.5 rounded inline-block font-bold"
-                  style={{ color: dmiColor, background: dmiColor + '15', border: `1px solid ${dmiColor}30` }}>
-                  {dmiStatus.label}
+        <div className="flex flex-col">
+          <h2 className="text-center text-[10px] font-bold uppercase tracking-[0.3em] mb-3 text-[#555]">MOMENTUM DEL NEGOCIO</h2>
+          <div className="rounded-lg p-5 flex flex-col justify-center relative overflow-hidden h-full min-h-[160px]" style={{
+            background: '#0d0d0d',
+            border: `2px solid ${dmiColor}50`,
+            boxShadow: `0 0 30px ${dmiColor}15, inset 0 1px 0 ${dmiColor}10`
+          }}>
+            <div className="flex items-center gap-6">
+              <div className="shrink-0 text-center">
+                <div className="mb-2">
+                  <span className="font-mono text-[8px] uppercase tracking-widest font-black block" style={{ color: dmiColor }}>DMI</span>
+                </div>
+                <span className="font-black" style={{
+                  fontSize: '3.5rem', color: dmiColor, lineHeight: 1,
+                  textShadow: `0 0 60px ${dmiColor}, 0 0 100px ${dmiColor}80, 0 0 150px ${dmiColor}40`,
+                  background: `${dmiColor}20`,
+                  padding: '0.4rem 0.6rem',
+                  borderRadius: '0.5rem',
+                  display: 'inline-block'
+                }}>
+                  {dmi ?? '—'}
                 </span>
               </div>
-            </div>
-            <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-              <Prop icon="flash_on" label="CAL" value={potScore != null ? `${potScore} / 100` : '—'} />
-              <Prop icon="favorite" label="SAL" value={healthScore != null ? `${healthScore} / 100` : '—'} />
-              <Prop icon="trending_up" label="Tendencia"
-                value={healthDelta != null ? (healthDelta >= 0 ? `↑ +${healthDelta}` : `↓ ${healthDelta}`) : '—'} />
+              <div className="flex-1 flex flex-col gap-2 min-w-0 border-l border-white/5 pl-4">
+                <Prop icon="flash_on" label="CAL" value={potScore != null ? `${potScore}/100` : '—'} />
+                <Prop icon="favorite" label="SAL" value={healthScore != null ? `${healthScore}/100` : '—'} />
+                <Prop icon="trending_up" label="Tendencia"
+                  value={healthDelta != null ? (healthDelta >= 0 ? `↑+${healthDelta}` : `↓${healthDelta}`) : '—'} />
+              </div>
+              <div className="shrink-0 flex items-center justify-center pr-6">
+                <span className="text-6xl drop-shadow-[0_0_15px_rgba(0,0,0,0.5)]">{getEmoji(dmi, 'dmi')}</span>
+              </div>
             </div>
           </div>
         </div>

@@ -275,55 +275,30 @@ const DashboardPage = () => {
 
   const getStageLabel = (id) => stageLabels[id] || id;
 
-  // ── Loading ──────────────────────────────────────────────────────────────
+  // ── Loading Screen (New & Improved UX) ───────────────────────────────────
   if (loading) return (
-    <div className="space-y-4 animate-pulse" style={{ fontFamily: "'JetBrains Mono', 'SF Mono', monospace" }}>
-      {/* Header skeleton */}
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="h-5 w-64 bg-[#1a1a1a] rounded mb-1" />
-          <div className="h-3 w-40 bg-[#111] rounded" />
-        </div>
-        <div className="flex gap-2">
-          <div className="h-6 w-16 bg-[#111] rounded" />
-          <div className="h-6 w-8 bg-[#111] rounded" />
-        </div>
+    <div className="fixed inset-0 bg-[#060606] flex flex-col items-center justify-center z-50">
+      <div className="relative">
+        {/* Glow effect background */}
+        <div className="absolute inset-0 rounded-full blur-2xl opacity-20" style={{ backgroundColor: NEON.green }} />
+        
+        {/* Neon Spinner */}
+        <div className="w-20 h-20 border-4 border-neutral-900 border-t-[#00FF87] rounded-full animate-spin shadow-[0_0_20px_rgba(0,255,135,0.3)]" />
       </div>
-      {/* Stats skeleton */}
-      <div className="grid grid-cols-4 gap-2">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-[#0d0d0d] border border-[#1a1a1a] rounded px-3 py-2">
-            <div className="h-2 w-12 bg-[#1a1a1a] rounded mb-2" />
-            <div className="h-6 w-8 bg-[#1e1e1e] rounded" />
-          </div>
-        ))}
-      </div>
-      {/* Ticker skeleton */}
-      <div className="bg-[#0d0d0d] border border-[#1a1a1a] rounded h-14">
-        <div className="px-3 py-1 border-b border-[#1a1a1a]">
-          <div className="h-2 w-20 bg-[#1a1a1a] rounded" />
+      
+      <div className="mt-12 text-center space-y-4">
+        <h2 className="text-white text-xs font-mono font-black uppercase tracking-[0.4em] animate-pulse">
+          Sincronizando negocios desde HubSpot
+        </h2>
+        <div className="flex items-center justify-center gap-1">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="w-1 h-1 rounded-full bg-[#00FF87] animate-bounce" 
+              style={{ animationDelay: `${i * 0.2}s` }} />
+          ))}
         </div>
-        <div className="flex items-center gap-8 px-4 py-2">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-3 w-32 bg-[#1a1a1a] rounded" />)}
-        </div>
-      </div>
-      {/* Step indicator (Removed) */}
-      {/* Table skeleton */}
-      <div className="border border-[#1a1a1a] rounded-lg overflow-hidden">
-        <div className="bg-[#0d0d0d] px-3 py-2 border-b border-[#1a1a1a]">
-          <div className="h-2 w-28 bg-[#1a1a1a] rounded" />
-        </div>
-        {[...Array(8)].map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-3 py-2.5 border-b border-[#111]">
-            <div className="h-2 w-4 bg-[#111] rounded" />
-            <div className="h-2 flex-1 bg-[#111] rounded" style={{ maxWidth: `${60 + (i * 13) % 30}%` }} />
-            <div className="h-2 w-16 bg-[#111] rounded" />
-            <div className="h-2 w-20 bg-[#111] rounded" />
-            <div className="h-2 w-8 bg-[#1a1a1a] rounded" />
-            <div className="h-2 w-8 bg-[#1a1a1a] rounded" />
-            <div className="h-2 w-8 bg-[#1a1a1a] rounded" />
-          </div>
-        ))}
+        <p className="text-[9px] font-mono text-neutral-600 uppercase tracking-widest pt-4">
+          Estableciendo conexión segura con la terminal...
+        </p>
       </div>
     </div>
   );
@@ -434,7 +409,7 @@ const DashboardPage = () => {
                             textShadow: '0 0 16px rgba(0,255,135,0.55), 0 0 4px rgba(255,255,255,0.9)',
                             display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden'
                           }}>
-                          {deal.properties.dealname}
+                            {deal.properties.dealname}
                         </p>
                         <span className="font-mono text-2xl font-black shrink-0" style={{ color: dmiColor, textShadow: `0 0 14px ${dmiColor}80` }}>
                           {deal.dmi ?? '—'}
@@ -508,11 +483,12 @@ const DashboardPage = () => {
           </button>
         ))}
         <div className="flex-1" />
-        <div className="flex items-center gap-1.5 bg-[#0d0d0d] border border-[#1e1e1e] rounded px-2 py-1">
-          <span className="material-symbols-outlined text-[14px] text-[#3a3a3a]">search</span>
-          <input type="text" placeholder="Buscar..." value={searchTerm}
+        <div className="flex items-center gap-2 bg-[#0d0d0d] border border-[#333] rounded px-3 py-2 transition-all focus-within:border-[#00FF87] focus-within:shadow-[0_0_15px_rgba(0,255,135,0.1)]">
+          <span className="material-symbols-outlined text-[18px] text-[#00FF87] drop-shadow-[0_0_8px_rgba(0,255,135,0.5)]">search</span>
+          <input type="text" placeholder="BUSCAR NEGOCIO..." value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-transparent text-white placeholder-[#3a3a3a] text-[11px] font-mono focus:outline-none w-32" />
+            className="bg-transparent text-[#FFFFFF] placeholder-[#FFFFFF] placeholder-opacity-40 text-xs font-mono font-bold focus:outline-none w-80 tracking-widest"
+            style={{ textShadow: '0 0 10px rgba(255,255,255,0.3)' }} />
         </div>
       </div>
 
