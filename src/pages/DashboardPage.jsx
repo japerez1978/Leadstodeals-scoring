@@ -197,6 +197,75 @@ const TableHead = () => (
   </thead>
 );
 
+// ─── Custom Neon MultiSelect ────────────────────────────────────────────────
+const MultiSelect = ({ label, options, selected, onChange, color = NEON.green }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleOption = (val) => {
+    const next = selected.includes(val) ? selected.filter(s => s !== val) : [...selected, val];
+    onChange(next);
+  };
+
+  const getDisplayText = () => {
+    if (selected.length === 0) return 'TODOS';
+    if (selected.length === 1) {
+      const opt = options.find(o => o.id === selected[0]);
+      return opt ? opt.name.toUpperCase() : '1 SELECC.';
+    }
+    return 'VARIOS';
+  };
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 bg-[#0d0d0d] border border-[#1e1e1e] rounded px-3 py-1.5 hover:border-[#333] transition-all min-w-[150px]"
+        style={selected.length > 0 ? { borderColor: color + '50', backgroundColor: color + '08' } : {}}
+      >
+        <span className="text-[9px] font-black uppercase tracking-widest absolute -top-2 left-2 px-1 bg-[#0a0a0a] z-10" style={{ color: NEON.green }}>
+          {label}
+        </span>
+        <span className="text-[10px] font-bold uppercase tracking-widest truncate max-w-[120px]" style={{ color: selected.length > 0 ? color : '#8a8a8a' }}>
+          {getDisplayText()}
+        </span>
+        <span className={`material-symbols-outlined text-[14px] text-[#3a3a3a] transition-transform ml-auto ${isOpen ? 'rotate-180' : ''}`}>expand_more</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 w-64 bg-[#0d0d0d] border border-[#1e1e1e] rounded shadow-2xl z-[100] max-h-60 overflow-y-auto p-1 custom-scrollbar">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#1e1e1e] mb-1">
+            <span className="text-[9px] font-bold text-[#555] uppercase tracking-widest">{label}</span>
+            <button onClick={() => onChange([])} className="text-[9px] text-[#00FF87] hover:underline uppercase">Limpiar</button>
+          </div>
+          {options.map(opt => {
+            const isSelected = selected.includes(opt.id);
+            return (
+              <label key={opt.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-[#1a1a1a] cursor-pointer rounded transition-colors group">
+                <input type="checkbox" checked={isSelected} onChange={() => toggleOption(opt.id)} className="hidden" />
+                <div className={`w-3 h-3 rounded-sm border transition-all flex items-center justify-center ${isSelected ? 'bg-[#00FF87] border-[#00FF87]' : 'border-[#333]'}`}>
+                  {isSelected && <span className="material-symbols-outlined text-[10px] text-black font-bold">check</span>}
+                </div>
+                <span className={`text-[10px] uppercase font-bold tracking-wider transition-colors ${isSelected ? 'text-white' : 'text-[#666] group-hover:text-[#aaa]'}`}>
+                  {opt.name}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -205,7 +274,9 @@ const DashboardPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('live');
+  const [selectedStatuses, setSelectedStatuses] = useState(['live']);
+  const [selectedUnits, setSelectedUnits] = useState([]);
+  const [selectedOwners, setSelectedOwners] = useState([]);
   const [clock, setClock] = useState(new Date());
 
   // Clock tick for header
@@ -247,12 +318,37 @@ const DashboardPage = () => {
     return { wonDeals: won, lostDeals: lost, liveDeals: live };
   }, [deals, stageProbabilities, stageLabels]);
 
+  const { businessUnits, owners } = useMemo(() => {
+    const units = new Set(deals.map(d => d.properties.unidad_de_negocio_deal).filter(Boolean));
+    const ownerIds = new Set(deals.map(d => d.properties.hubspot_owner_id).filter(Boolean));
+    
+    return {
+      businessUnits: Array.from(units).sort(),
+      owners: Array.from(ownerIds).map(id => ({
+        id: String(id),
+        name: ownerMap[id] || `ID: ${id}`
+      })).sort((a, b) => a.name.localeCompare(b.name))
+    };
+  }, [deals, ownerMap]);
+
   const filtered = useMemo(() => {
-    const source = activeTab === 'won' ? wonDeals : activeTab === 'lost' ? lostDeals : liveDeals;
-    if (!searchTerm) return source;
-    const q = searchTerm.toLowerCase();
-    return source.filter(d => d.properties.dealname?.toLowerCase().includes(q));
-  }, [activeTab, wonDeals, lostDeals, liveDeals, searchTerm]);
+    // Determine which deals to show based on selected statuses
+    let source = [];
+    const statuses = selectedStatuses.length === 0 ? ['live', 'won', 'lost'] : selectedStatuses;
+    if (statuses.includes('live')) source = [...source, ...liveDeals];
+    if (statuses.includes('won')) source = [...source, ...wonDeals];
+    if (statuses.includes('lost')) source = [...source, ...lostDeals];
+
+    // Deduplicate and re-sort by DMI
+    source = Array.from(new Set(source)).sort((a, b) => (b.dmi ?? 0) - (a.dmi ?? 0));
+
+    return source.filter(d => {
+      const matchSearch = !searchTerm || d.properties.dealname?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchUnit = selectedUnits.length === 0 || selectedUnits.includes(d.properties.unidad_de_negocio_deal);
+      const matchOwner = selectedOwners.length === 0 || selectedOwners.includes(String(d.properties.hubspot_owner_id));
+      return matchSearch && matchUnit && matchOwner;
+    });
+  }, [liveDeals, wonDeals, lostDeals, searchTerm, selectedStatuses, selectedUnits, selectedOwners]);
 
   const topDeals = useMemo(() =>
     [...liveDeals].sort((a, b) => (b.dmi ?? 0) - (a.dmi ?? 0)).slice(0, 10),
@@ -263,7 +359,7 @@ const DashboardPage = () => {
 
   // ── Averages per active tab ──────────────────────────────────────────────
   const averages = useMemo(() => {
-    const source = activeTab === 'won' ? wonDeals : activeTab === 'lost' ? lostDeals : liveDeals;
+    const source = filtered;
     if (source.length === 0) return { cal: 0, sal: 0, dmi: 0 };
     const cal = Math.round(source.reduce((s, d) => s + (d.score ?? 0), 0) / source.length);
     const salDeals = source.filter(d => d.healthScore != null);
@@ -271,7 +367,7 @@ const DashboardPage = () => {
     const dmiDeals = source.filter(d => d.dmi != null);
     const dmi = dmiDeals.length ? Math.round(dmiDeals.reduce((s, d) => s + d.dmi, 0) / dmiDeals.length) : 0;
     return { cal, sal, dmi };
-  }, [activeTab, wonDeals, lostDeals, liveDeals]);
+  }, [filtered]);
 
   const getStageLabel = (id) => stageLabels[id] || id;
 
@@ -310,7 +406,14 @@ const DashboardPage = () => {
     won:   { icon: '▲', label: 'GANADOS',  color: NEON.green, sectionIcon: '▲', sectionTitle: 'NEGOCIOS GANADOS' },
     lost:  { icon: '▼', label: 'PERDIDOS', color: NEON.red,   sectionIcon: '▼', sectionTitle: 'NEGOCIOS PERDIDOS' },
   };
-  const tc = tabConfig[activeTab];
+  const displayStatuses = selectedStatuses.length === 1 ? selectedStatuses : (selectedStatuses.length === 0 ? ['live', 'won', 'lost'] : selectedStatuses);
+  const tc = displayStatuses.length === 1 ? tabConfig[displayStatuses[0]] : {
+    icon: '◉',
+    label: 'VARIOS',
+    color: NEON.blue,
+    sectionIcon: '◉',
+    sectionTitle: 'NEGOCIOS FILTRADOS'
+  };
 
   return (
     <div className="space-y-4" style={{ fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace" }}>
@@ -438,10 +541,11 @@ const DashboardPage = () => {
         </div>
       )}
 
+
       {/* ── Averages strip ── */}
       <div className="bg-[#0d0d0d] border border-[#1e1e1e] rounded flex items-center justify-between px-4 py-2">
         <span className="text-[9px] font-bold uppercase tracking-widest text-[#555]">
-          MEDIAS {tabConfig[activeTab].label}
+          MEDIAS {tc.label}
         </span>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
@@ -464,30 +568,46 @@ const DashboardPage = () => {
 
       {/* ── Tab bar + Search ── */}
       <div className="flex items-center gap-2">
-        {Object.entries(tabConfig).map(([key, cfg]) => (
-          <button key={key} onClick={() => setActiveTab(key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
-              activeTab === key
-                ? 'border'
-                : 'bg-[#0d0d0d] border border-transparent text-[#555] hover:text-white'
-            }`}
-            style={activeTab === key ? {
-              color: cfg.color,
-              borderColor: cfg.color + '50',
-              backgroundColor: cfg.color + '10',
-              boxShadow: `0 0 12px ${cfg.color}20`,
-            } : {}}>
-            <span>{cfg.icon}</span>
-            <span>{cfg.label}</span>
-            <span className="font-mono ml-1 text-[9px] opacity-60">{tabData[key].length}</span>
-          </button>
-        ))}
+        {/* ── Status MultiSelect ── */}
+        <MultiSelect 
+          label="ESTADO"
+          options={[
+            { id: 'live', name: 'EN CURSO' },
+            { id: 'won',  name: 'GANADOS' },
+            { id: 'lost', name: 'PERDIDOS' }
+          ]}
+          selected={selectedStatuses}
+          onChange={setSelectedStatuses}
+          color={selectedStatuses.includes('won') ? NEON.green : selectedStatuses.includes('lost') ? NEON.red : NEON.blue}
+        />
+
+        <div className="h-4 w-px bg-[#1e1e1e] mx-1" />
+
+        {/* ── MultiSelect Filters ── */}
+        <div className="flex items-center gap-2">
+          <MultiSelect 
+            label="NEGOCIO"
+            options={businessUnits.map(u => ({ id: u, name: u }))}
+            selected={selectedUnits}
+            onChange={setSelectedUnits}
+            color={NEON.blue}
+          />
+          <MultiSelect 
+            label="PROPIETARIO"
+            options={owners}
+            selected={selectedOwners}
+            onChange={setSelectedOwners}
+            color={NEON.orange}
+          />
+        </div>
+
         <div className="flex-1" />
-        <div className="flex items-center gap-2 bg-[#0d0d0d] border border-[#333] rounded px-3 py-2 transition-all focus-within:border-[#00FF87] focus-within:shadow-[0_0_15px_rgba(0,255,135,0.1)]">
+
+        <div className="flex items-center gap-2 bg-[#0d0d0d] border border-[#333] rounded px-3 py-1.5 transition-all focus-within:border-[#00FF87] focus-within:shadow-[0_0_15px_rgba(0,255,135,0.1)]">
           <span className="material-symbols-outlined text-[18px] text-[#00FF87] drop-shadow-[0_0_8px_rgba(0,255,135,0.5)]">search</span>
           <input type="text" placeholder="BUSCAR NEGOCIO..." value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-transparent text-[#FFFFFF] placeholder-[#FFFFFF] placeholder-opacity-40 text-xs font-mono font-bold focus:outline-none w-80 tracking-widest"
+            className="bg-transparent text-[#FFFFFF] placeholder-[#FFFFFF] placeholder-opacity-40 text-xs font-mono font-bold focus:outline-none w-64 tracking-widest"
             style={{ textShadow: '0 0 10px rgba(255,255,255,0.3)' }} />
         </div>
       </div>
