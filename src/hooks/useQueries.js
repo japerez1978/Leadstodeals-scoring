@@ -13,7 +13,21 @@ export const useScoringMatrices = (tenantId) => {
         .eq('tenant_id', tenantId)
         .order('name');
       if (error) throw error;
-      return data || [];
+      
+      // Stable sorting in frontend to prevent UI jumping
+      const sorted = (data || []).map(matrix => ({
+        ...matrix,
+        criteria: (matrix.criteria || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
+        score_thresholds: (matrix.score_thresholds || []).sort((a, b) => b.min_score - a.min_score),
+      })).map(matrix => ({
+        ...matrix,
+        criteria: matrix.criteria.map(c => ({
+          ...c,
+          criterion_options: (c.criterion_options || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || b.multiplier - a.multiplier)
+        }))
+      }));
+
+      return sorted;
     },
     enabled: !!tenantId,
   });

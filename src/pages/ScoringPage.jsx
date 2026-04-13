@@ -6,9 +6,13 @@ import Spinner from '../components/Spinner';
 
 const NEON = { green: '#00FF87', red: '#FF3B5C', blue: '#00D4FF', yellow: '#FFD600', orange: '#FF7A00', dim: '#3a3a3a' };
 
+const PROVINCIAS_ESPANA = [
+  "Álava", "Albacete", "Alicante", "Almería", "Asturias", "Ávila", "Badajoz", "Barcelona", "Burgos", "Cáceres", "Cádiz", "Cantabria", "Castellón", "Ciudad Real", "Córdoba", "La Coruña", "Cuenca", "Gerona", "Granada", "Guadalajara", "Guipúzcoa", "Huelva", "Huesca", "Islas Baleares", "Jaén", "León", "Lérida", "Lugo", "Madrid", "Málaga", "Murcia", "Navarra", "Orense", "Palencia", "Las Palmas", "Pontevedra", "La Rioja", "Salamanca", "Segovia", "Sevilla", "Soria", "Tarragona", "Santa Cruz de Tenerife", "Teruel", "Toledo", "Valencia", "Valladolid", "Vizcaya", "Zamora", "Zaragoza", "Ceuta", "Melilla"
+];
+
 /* ─────────────────────────────────────────────
    Add Criterion Modal (terminal style)
-───────────────────────────────────────────── */
+   ───────────────────────────────────────────── */
 const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
   const [properties, setProperties] = useState([]);
   const [loadingProps, setLoadingProps] = useState(true);
@@ -20,6 +24,7 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
   const [weight, setWeight] = useState(10);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [useSpainProvinces, setUseSpainProvinces] = useState(false);
 
   useEffect(() => {
     const fetchProperties = async () => {
@@ -56,7 +61,10 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
     setSelectedProp(prop);
     setName(prop.label || '');
     setHubspotProperty(prop.name || '');
-    if (prop.type === 'enumeration' || prop.type === 'number') setType('options');
+    const isLocation = prop.name.toLowerCase().includes('provinc') || prop.label.toLowerCase().includes('provinc');
+    setUseSpainProvinces(isLocation);
+    
+    if (prop.type === 'enumeration' || prop.type === 'number' || isLocation) setType('options');
     else setType('text');
   };
 
@@ -78,8 +86,12 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
       if (insertError) throw insertError;
 
       if (type === 'options') {
-        let opts;
-        if (selectedProp.type === 'enumeration' && selectedProp.options?.length > 0) {
+        let opts = [];
+        if (useSpainProvinces) {
+          opts = PROVINCIAS_ESPANA.map((label, idx) => ({
+            criterion_id: newCriterion.id, label, hubspot_value: label, multiplier: 0, sort_order: idx,
+          }));
+        } else if (selectedProp.type === 'enumeration' && selectedProp.options?.length > 0) {
           opts = selectedProp.options.map((opt, idx) => ({
             criterion_id: newCriterion.id, label: opt.label, hubspot_value: opt.value, multiplier: 0, sort_order: idx,
           }));
@@ -92,8 +104,14 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
             { label: 'Muy Bajo', hubspot_value: 'muy_bajo', multiplier: -1, sort_order: 4 },
           ].map(o => ({ ...o, criterion_id: newCriterion.id }));
         }
-        const { error: optsError } = await supabase.from('criterion_options').insert(opts);
-        if (optsError) throw optsError;
+        
+        // Split into chunks if there are many provinces to avoid potential payload limits
+        const chunkSize = 50;
+        for (let i = 0; i < opts.length; i += chunkSize) {
+          const chunk = opts.slice(i, i + chunkSize);
+          const { error: optsError } = await supabase.from('criterion_options').insert(chunk);
+          if (optsError) throw optsError;
+        }
       }
       onSaved();
     } catch (e) {
@@ -188,9 +206,23 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
                     <input type="number" step="1" value={weight} onChange={(e) => setWeight(e.target.value)} className={inputCls + ' text-center'} />
                   </div>
                 </div>
-                {type === 'options' && selectedProp.options?.length > 0 && (
+
+                {/* Province seeder hint */}
+                {(hubspotProperty.toLowerCase().includes('provinc') || name.toLowerCase().includes('provinc')) && (
+                  <div className="bg-[#00FF8710] border border-[#00FF8730] rounded p-2 flex items-center justify-between">
+                    <span className="text-[10px] text-[#00FF87]">¿Cargar las 52 provincias de España?</span>
+                    <button onClick={() => setUseSpainProvinces(!useSpainProvinces)}
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${
+                        useSpainProvinces ? 'bg-[#00FF87] text-black' : 'border border-[#00FF87] text-[#00FF87]'
+                      }`}>
+                      {useSpainProvinces ? 'SÍ' : 'NO'}
+                    </button>
+                  </div>
+                )}
+
+                {type === 'options' && !useSpainProvinces && selectedProp.options?.length > 0 && (
                   <div>
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Opciones ({selectedProp.options.length})</p>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-[#555] mb-1">Opciones HubSpot ({selectedProp.options.length})</p>
                     <div className="bg-[#0a0a0a] border border-[#1e1e1e] rounded p-2 space-y-0.5 max-h-32 overflow-y-auto">
                       {selectedProp.options.map((opt) => (
                         <div key={opt.value} className="flex items-center justify-between text-[10px]">
@@ -226,29 +258,37 @@ const AddCriterionModal = ({ matrixId, onClose, onSaved }) => {
 
 /* ─────────────────────────────────────────────
    Main Page — Terminal Style
-───────────────────────────────────────────── */
+   ───────────────────────────────────────────── */
 const ScoringPage = () => {
   const { tenant } = useAuth();
   const { data: matrices = [], isLoading: loading, refetch: fetchMatrices } = useScoringMatrices(tenant?.id);
-  const [selectedMatrix, setSelectedMatrix] = useState(null);
+  const [selectedMatrixId, setSelectedMatrixId] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Derive selected matrix from ID to ensure reactivity
+  const selectedMatrix = useMemo(() => {
+    if (!matrices.length) return null;
+    return matrices.find(m => m.id === selectedMatrixId) || matrices[0];
+  }, [matrices, selectedMatrixId]);
+
   useEffect(() => {
-    if (matrices.length > 0 && !selectedMatrix) {
-      setSelectedMatrix(matrices[0]);
+    if (matrices.length > 0 && !selectedMatrixId) {
+      setSelectedMatrixId(matrices[0].id);
     }
-  }, [matrices, selectedMatrix]);
+  }, [matrices, selectedMatrixId]);
 
   const updateCriterion = async (criterionId, field, value) => {
     try {
-      await supabase.from('criteria').update({ [field]: value }).eq('id', criterionId);
+      const { error } = await supabase.from('criteria').update({ [field]: value }).eq('id', criterionId);
+      if (error) throw error;
       await fetchMatrices();
     } catch (error) { console.error('Error updating criterion:', error); }
   };
 
   const updateOption = async (optionId, field, value) => {
     try {
-      await supabase.from('criterion_options').update({ [field]: value }).eq('id', optionId);
+      const { error } = await supabase.from('criterion_options').update({ [field]: value }).eq('id', optionId);
+      if (error) throw error;
       await fetchMatrices();
     } catch (error) { console.error('Error updating option:', error); }
   };
@@ -256,7 +296,8 @@ const ScoringPage = () => {
   const deleteCriterion = async (criterion) => {
     if (!window.confirm(`¿Eliminar el criterio "${criterion.name}"?`)) return;
     try {
-      await supabase.from('criteria').delete().eq('id', criterion.id);
+      const { error } = await supabase.from('criteria').delete().eq('id', criterion.id);
+      if (error) throw error;
       await fetchMatrices();
     } catch (error) { console.error('Error deleting criterion:', error); }
   };
@@ -290,7 +331,7 @@ const ScoringPage = () => {
             </div>
             <div className="space-y-0.5 p-1">
               {matrices.map(matrix => (
-                <button key={matrix.id} onClick={() => setSelectedMatrix(matrix)}
+                <button key={matrix.id} onClick={() => setSelectedMatrixId(matrix.id)}
                   className={`w-full text-left px-2 py-2 rounded transition-colors text-[11px] ${
                     selectedMatrix?.id === matrix.id
                       ? 'bg-[#00D4FF10] border border-[#00D4FF30] text-white'
@@ -362,6 +403,20 @@ const ScoringPage = () => {
                             <span className="text-[#3a3a3a] text-[9px] font-mono ml-2">{criterion.hubspot_property}</span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-2">
+                            {(criterion.hubspot_property.toLowerCase().includes('provinc') || criterion.name.toLowerCase().includes('provinc')) && (
+                              <button onClick={async () => {
+                                if (!window.confirm("¿Cargar las 52 provincias de España en este criterio?")) return;
+                                const opts = PROVINCIAS_ESPANA.map((label, idx) => ({
+                                  criterion_id: criterion.id, label, hubspot_value: label, multiplier: 0, sort_order: idx,
+                                }));
+                                const { error } = await supabase.from('criterion_options').insert(opts);
+                                if (error) alert("Error al sincronizar: " + error.message);
+                                else await fetchMatrices();
+                              }}
+                              className="px-2 py-0.5 rounded text-[8px] font-bold border border-[#00D4FF30] text-[#00D4FF] hover:bg-[#00D4FF10] transition-all">
+                                SYNC PROVINCIAS
+                              </button>
+                            )}
                             <label className="text-[9px] text-[#555]">PESO</label>
                             <input type="number" step="0.1" defaultValue={criterion.weight}
                               onBlur={(e) => {
@@ -379,17 +434,27 @@ const ScoringPage = () => {
                           <div className="bg-[#0a0a0a] px-3 py-1.5 space-y-0.5">
                             {criterion.criterion_options.map(option => {
                               const m = option.multiplier;
-                              const mColor = m > 0 ? NEON.green : m < 0 ? NEON.red : NEON.dim;
+                              let mColor = NEON.dim;
+                              if (m === 1) mColor = NEON.green; // Muy Alto
+                              else if (m === 0.5) mColor = '#70FFAD'; // Alto (suave)
+                              else if (m === 0) mColor = NEON.yellow; // Medio
+                              else if (m === -0.5) mColor = '#FF7A00'; // Bajo (suave)
+                              else if (m === -1) mColor = NEON.red; // Muy Bajo
+
                               return (
                                 <div key={option.id} className="flex items-center justify-between py-1 text-[10px]">
                                   <div className="flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: mColor }} />
+                                    <span className="w-1.5 h-1.5 rounded-full" style={{ 
+                                      backgroundColor: mColor,
+                                      boxShadow: m === 1 || m === -1 ? `0 0 5px ${mColor}80` : 'none'
+                                    }} />
                                     <span className="text-white">{option.label}</span>
                                     <span className="text-[#3a3a3a] font-mono text-[9px]">{option.hubspot_value}</span>
                                   </div>
                                   <select value={option.multiplier}
                                     onChange={(e) => updateOption(option.id, 'multiplier', parseFloat(e.target.value))}
-                                    className="px-1.5 py-0.5 bg-[#111] border border-[#1e1e1e] rounded text-white text-[10px] font-mono focus:outline-none focus:border-[#00D4FF] cursor-pointer">
+                                    className="px-1.5 py-0.5 bg-[#111] border rounded text-white text-[10px] font-mono focus:outline-none cursor-pointer transition-colors"
+                                    style={{ borderColor: mColor + '40', color: mColor }}>
                                     <option value={1}>+1.0 Muy Alto</option>
                                     <option value={0.5}>+0.5 Alto</option>
                                     <option value={0}>0.0 Medio</option>
@@ -402,16 +467,6 @@ const ScoringPage = () => {
                           </div>
                         )}
 
-                        {criterion.type === 'range' && criterion.config?.ranges && (
-                          <div className="bg-[#0a0a0a] px-3 py-1.5 space-y-0.5">
-                            {criterion.config.ranges.map((range, idx) => (
-                              <div key={idx} className="flex items-center justify-between py-1 text-[10px]">
-                                <span className="text-white font-mono">{range.min ?? '∞'} – {range.max ?? '∞'}</span>
-                                <span className="font-mono" style={{ color: NEON.blue }}>× {range.multiplier}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
