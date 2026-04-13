@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/(api|proxy)/.*", "destination": "https://intranox-proxy-production.up.railway.app/:path*" },
+    { "source": "/api/:path*", "destination": "https://intranox-proxy-production.up.railway.app/api/:path*" },
+    { "source": "/proxy/:path*", "destination": "https://intranox-proxy-production.up.railway.app/proxy/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
